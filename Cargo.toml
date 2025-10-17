@@ -1,0 +1,18 @@
+[package]
+name = "rex"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rtb-runtime = { path = "../openrtb-rs", features = ["actix-web"] }
+pipeline = {  path = "../pipeline" }
+actix-web = "4.11.0"
+serde = "1.0.228"
+serde_json = "1.0.145"
+anyhow = "1.0.100"
+async-trait = "0.1.89"
+derive_builder = "0.20.2"
+config = { version = "0.15.18", default-features = false, features = ["async", "convert-case", "yaml"] }
+parking_lot = "0.12.5"
+rust-device-detector = { git = "https://github.com/simplecastapps/rust-device-detector.git", branch = "main", features = ["cache"] }
+fast_uaparser = "2.0.1"
