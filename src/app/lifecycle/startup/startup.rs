@@ -8,6 +8,7 @@ use crate::core::config_manager::ConfigManager;
 use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
+use crate::app::startup::tasks::device_load::DeviceLookupLoadTask;
 
 pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyhow::Error> {
     let cfg_manager = Arc::new(ConfigManager::new(cfg_path));
@@ -16,6 +17,7 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .with_blocking(Box::new(ConfigLoadTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(BidderManagerLoadTask::new(cfg_manager.clone())))
         .with_async(Box::new(IpRiskLoadTask))
+        .with_async(Box::new(DeviceLookupLoadTask))
         .with_blocking(Box::new(BuildRtbPipelineTask))
         .with_async(Box::new(StartServerTask))
         .build()

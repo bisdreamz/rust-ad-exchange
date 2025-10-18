@@ -1,6 +1,6 @@
 use crate::app::lifecycle::context::StartupContext;
 use crate::core::config_manager::ConfigManager;
-use anyhow::Error;
+use anyhow::{bail, format_err, Error};
 use pipeline::BlockingTask;
 use std::sync::Arc;
 
@@ -15,11 +15,14 @@ impl ConfigLoadTask {
 }
 
 impl BlockingTask<StartupContext, anyhow::Error> for ConfigLoadTask {
-    fn run(&self, _ctx: &StartupContext) -> Result<(), Error> {
+    fn run(&self, context: &StartupContext) -> Result<(), Error> {
         self.manager.start()?;
 
         println!("Config loaded");
         println!("{:?}", self.manager.get());
+
+        context.config.set(self.manager.get().clone())
+            .map_err(|e| format_err!("Error assigning config to context: {:?}", e))?;
 
         Ok(())
     }

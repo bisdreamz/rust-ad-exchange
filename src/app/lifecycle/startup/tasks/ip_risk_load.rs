@@ -12,9 +12,21 @@ impl AsyncTask<StartupContext, anyhow::Error> for IpRiskLoadTask {
     async fn run(&self, context: &StartupContext) -> Result<(), Error> {
         println!("Ip Risk loading started");
 
+        let config_opt = context.config.get();
+        if (config_opt.is_none()) {
+            bail!("Missing config");
+        }
+
+        let cache_config = &config_opt.unwrap().caches;
+        let cache_sz = cache_config.cache_ip_sz;
+
+        if cache_sz < 10000 {
+            bail!("Ip risk cache size way too small! Min 10k")
+        }
+
         let ip_risk_filter = IpRiskFilter::try_new(
-            100_000,
-            Duration::from_secs(5 * 60),
+            cache_sz,
+            Duration::from_secs(10 * 60),
         ).await?;
 
         println!("Ip Risk loading of {} ranges finished", ip_risk_filter.ranges());

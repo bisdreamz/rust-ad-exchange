@@ -10,9 +10,25 @@ pub struct BidderConfig {
     pub endpoints: Vec<Endpoint>
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct CacheConfig {
+    pub cache_device_sz: usize,
+    pub cache_ip_sz: usize,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            cache_device_sz: 250_000,
+            cache_ip_sz: 100_000
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
-    // ssl, initial bidders, db details..
+    #[serde(default)]
+    pub caches: CacheConfig,
     pub bidders: Vec<BidderConfig>
 }
 

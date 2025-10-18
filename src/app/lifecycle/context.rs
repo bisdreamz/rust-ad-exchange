@@ -3,14 +3,21 @@ use rtb::server::Server;
 use std::sync::{Arc, Mutex, OnceLock};
 use anyhow::Error;
 use pipeline::Pipeline;
+use crate::app::config::RexConfig;
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::core::enrichment::device::DeviceLookup;
 use crate::core::managers::bidders::BidderManager;
 
 #[derive(Default)]
 pub struct StartupContext {
+    /// Local config options
+    pub config: OnceLock<RexConfig>,
+
     // Transient items that are assigned but taken ownership of later
     /// Ip bot filter, pipeline takes ownership of it later
     pub ip_risk_filter: Mutex<Option<IpRiskFilter>>,
+    /// User agent lookup provider
+    pub device_lookup: Mutex<Option<DeviceLookup>>,
 
     // Shared things and data providers
     /// Maintains updated list of bidders and endpoints

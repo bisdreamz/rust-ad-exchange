@@ -7,12 +7,13 @@ use std::sync::Arc;
 use crate::app::pipeline::ortb::tasks;
 
 pub fn build_rtb_pipeline(context: &StartupContext) -> Result<(), Error> {
-    let device_lookup = DeviceLookup::try_new(NonZeroU32::new(250_000).unwrap())
-        .expect("Failed loading device lookup data");
-
     let ip_risk_filter = context.ip_risk_filter.lock().unwrap()
         .take()
         .ok_or(anyhow::anyhow!("IP risk filter not set"))?;
+
+    let device_lookup = context.device_lookup.lock().unwrap()
+        .take()
+        .ok_or(anyhow::anyhow!("Device lookup not set"))?;
 
     let bidder_manager = match context.bidder_manager.get() {
         Some(bidder_manager) => bidder_manager,
