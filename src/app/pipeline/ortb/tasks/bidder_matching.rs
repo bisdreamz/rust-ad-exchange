@@ -1,13 +1,13 @@
-use std::sync::Arc;
+use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
+use crate::app::pipeline::ortb::AuctionContext;
+use crate::core::managers::bidders::BidderManager;
+use crate::core::models::bidder::{Bidder, Endpoint};
 use anyhow::{bail, Error};
 use parking_lot::Mutex;
 use pipeline::BlockingTask;
-use rtb::BidRequest;
 use rtb::common::bidresponsestate::BidResponseState;
-use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::BidderContext;
-use crate::core::managers::bidders::BidderManager;
-use crate::core::models::bidder::{Bidder, Endpoint};
+use rtb::BidRequest;
+use std::sync::Arc;
 
 pub struct BidderMatchingTask {
     manager: Arc<BidderManager>
@@ -49,18 +49,23 @@ impl BidderMatchingTask {
         format_match
     }
 
-    fn get_filtered_matching(bidders: &Vec<Bidder>, req: &BidRequest) -> Vec<Bidder> {
-        let mut matches = bidders.clone();
+    fn get_filtered_matching(bidders: &Vec<(Arc<Bidder>, Vec<Arc<Endpoint>>)>, req: &BidRequest)
+        -> Vec<(Arc<Bidder>, Vec<Arc<Endpoint>>)> {
+        let mut matches = Vec::with_capacity(bidders.len());
 
-        for bidder in &mut matches {
-            let mut endpoints = std::mem::take(&mut bidder.endpoints);
-            endpoints.retain(|endpoint| {
-                Self::matches_endpoint(bidder, endpoint, req)
-            });
-            bidder.endpoints = endpoints;
+        for (bidder, endpoints) in bidders {
+            let mut bidder_matches = Vec::with_capacity(endpoints.len());
+
+            for endpoint in endpoints {
+                if Self::matches_endpoint(&bidder, endpoint, req) {
+                    bidder_matches.push(endpoint.clone());
+                }
+            }
+
+            if !bidder_matches.is_empty() {
+                matches.push((bidder.clone(), bidder_matches));
+            }
         }
-
-        matches.retain(|bidder| !bidder.endpoints.is_empty());
 
         matches
     }
@@ -89,10 +94,12 @@ impl BlockingTask<AuctionContext, Error> for BidderMatchingTask {
 
         let mut bidder_contexts = Vec::with_capacity(matches.len());
 
-        for bidder in matches {
+        for (bidder, endpoints) in matches {
             bidder_contexts.push(BidderContext {
                 bidder,
-                reqs: Mutex::new(vec![context.req.read().clone()])
+                endpoints,
+                reqs: Mutex::new(vec![context.req.read().clone()]),
+                response: Mutex::new(BidderResponseState::Timeout),
             })
         }
 

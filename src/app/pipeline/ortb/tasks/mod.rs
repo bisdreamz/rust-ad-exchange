@@ -1,4 +1,14 @@
-pub mod device_lookup;
-pub mod validate;
-pub mod ip_block;
-pub mod bidder_matching;
+mod device_lookup;
+pub use device_lookup::DeviceLookupTask;
+
+mod validate;
+pub use validate::ValidateRequestTask;
+
+mod ip_block;
+pub use ip_block::IpBlockTask;
+
+mod bidder_matching;
+pub use bidder_matching::BidderMatchingTask;
+
+mod bidder_callouts;
+pub use bidder_callouts::BidderCalloutsTask;

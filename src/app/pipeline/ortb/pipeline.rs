@@ -1,10 +1,10 @@
 use crate::app::context::StartupContext;
-use crate::app::pipeline::ortb::tasks;
 use crate::core::enrichment::device::DeviceLookup;
 use anyhow::{bail, Error};
 use pipeline::PipelineBuilder;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use crate::app::pipeline::ortb::tasks;
 
 pub fn build_rtb_pipeline(context: &StartupContext) -> Result<(), Error> {
     let device_lookup = DeviceLookup::try_new(NonZeroU32::new(250_000).unwrap())
@@ -20,10 +20,11 @@ pub fn build_rtb_pipeline(context: &StartupContext) -> Result<(), Error> {
     };
 
     let rtb_pipeline = PipelineBuilder::new()
-        .with_blocking(Box::new(tasks::validate::ValidateRequestTask))
-        .with_blocking(Box::new(tasks::ip_block::IpBlockTask::new(ip_risk_filter)))
-        .with_blocking(Box::new(tasks::device_lookup::DeviceLookupTask::new(device_lookup)))
-        .with_blocking(Box::new(tasks::bidder_matching::BidderMatchingTask::new(bidder_manager.clone())))
+        .with_blocking(Box::new(tasks::ValidateRequestTask))
+        .with_blocking(Box::new(tasks::IpBlockTask::new(ip_risk_filter)))
+        .with_blocking(Box::new(tasks::DeviceLookupTask::new(device_lookup)))
+        .with_blocking(Box::new(tasks::BidderMatchingTask::new(bidder_manager.clone())))
+        .with_async(Box::new(tasks::BidderCalloutsTask))
         .build()
         .expect("Auction pipeline should have tasks");
 

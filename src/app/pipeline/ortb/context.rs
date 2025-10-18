@@ -1,8 +1,21 @@
-use crate::core::models::bidder::Bidder;
+use crate::core::models::bidder::{Bidder, Endpoint};
 use parking_lot::{Mutex, RwLock};
 use rtb::common::bidresponsestate::BidResponseState;
-use rtb::BidRequest;
-use std::sync::OnceLock;
+use rtb::{BidRequest, BidResponse};
+use std::sync::{Arc, OnceLock};
+
+pub enum BidderResponseState {
+    Timeout,
+    Error(u32, String),
+    NoBid(Option<u32>),
+    Bid(BidResponse),
+}
+
+pub struct BidderResponse {
+    endpoint: Endpoint,
+    state: BidderResponseState,
+    latency: u32
+}
 
 /// Bidder context
 ///
@@ -15,8 +28,10 @@ use std::sync::OnceLock;
 /// request are stored and safe to mutate, e.g. are margins or tagid changes.
 /// Can be multiple requests in case of behavior such as imp request breakout.
 pub struct BidderContext {
-    pub bidder: Bidder,
-    pub reqs: Mutex<Vec<BidRequest>>
+    pub bidder: Arc<Bidder>,
+    pub endpoints: Vec<Arc<Endpoint>>,
+    pub reqs: Mutex<Vec<BidRequest>>,
+    pub response: Mutex<BidderResponseState>
 }
 
 /// Top level auction context object which carries all context required

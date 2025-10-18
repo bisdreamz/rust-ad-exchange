@@ -47,6 +47,5 @@ pub struct Endpoint {
 pub struct Bidder {
     pub name: String,
     pub gzip: bool,
-    pub multi_imp: bool,
-    pub endpoints: Vec<Endpoint>
+    pub multi_imp: bool
 }
