@@ -1,4 +1,4 @@
-use crate::app::core::enrichment::device::{DeviceLookup, DeviceType};
+use crate::core::enrichment::device::{DeviceLookup, DeviceType};
 use crate::app::pipeline::ortb::context::AuctionContext;
 use anyhow::{anyhow, Error};
 use pipeline::BlockingTask;

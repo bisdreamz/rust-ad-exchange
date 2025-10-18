@@ -1,4 +1,5 @@
 mod app;
+mod core;
 
 use actix_web::rt::signal;
 use rtb::actix_web;
@@ -12,6 +13,7 @@ async fn main() {
     let startup_pipeline = build_start_pipeline("rex.yaml".into());
     let startup_ctx = StartupContext {
         server: OnceLock::new(),
+        ..Default::default()
     };
 
     match startup_pipeline.run(&startup_ctx).await {

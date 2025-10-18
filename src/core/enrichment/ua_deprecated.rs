@@ -1,5 +1,5 @@
 use rust_device_detector::device_detector::{DeviceDetector, KnownDevice};
-use crate::app::core::enrichment::device::{DeviceInfo, DeviceType};
+use crate::core::enrichment::device::{DeviceInfo, DeviceType};
 
 pub struct DeviceLookupOld {
     ua: DeviceDetector

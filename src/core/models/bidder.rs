@@ -1,0 +1,52 @@
+use derive_builder::Builder;
+use serde::{Deserialize, Serialize};
+use crate::core::models::shaping::TrafficShaping;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
+pub struct Targeting {
+    pub geos: Vec<String>,
+    pub banner: bool,
+    pub video: bool,
+    pub native: bool
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum HttpProto {
+    /// Force http1.1 only
+    Http1,
+    /// Force h2c prior knowledge
+    H2c,
+    /// Allow, but not force, http2 upgrades via alpn
+    #[default]
+    Http2,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum Encoding {
+    Json,
+    #[default]
+    Protobuf
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+pub struct Endpoint {
+    pub enabled: bool,
+    pub name: String,
+    pub url: String,
+    pub qps: usize,
+    pub shaping: TrafficShaping,
+    #[serde(default)]
+    pub protocol: HttpProto,
+    #[serde(default)]
+    pub encoding: Encoding,
+    pub targeting: Targeting,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+#[serde(default)]
+pub struct Bidder {
+    pub name: String,
+    pub gzip: bool,
+    pub multi_imp: bool,
+    pub endpoints: Vec<Endpoint>
+}

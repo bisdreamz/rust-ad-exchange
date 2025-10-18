@@ -1,7 +1,7 @@
 use crate::app::lifecycle::context::StartupContext;
 use crate::app::pipeline::ortb::AuctionContext;
-use actix_web::web::Json;
 use actix_web::web;
+use actix_web::web::Json;
 use anyhow::{anyhow, Error};
 use async_trait::async_trait;
 use pipeline::{AsyncTask, Pipeline};
@@ -11,15 +11,7 @@ use rtb::server::{Server, ServerConfig};
 use rtb::BidRequest;
 use std::sync::Arc;
 
-pub struct StartServerTask {
-    pipeline: Arc<Pipeline<AuctionContext, anyhow::Error>>
-}
-
-impl StartServerTask {
-    pub fn new(pipeline: Pipeline<AuctionContext, anyhow::Error>) -> Self {
-        Self { pipeline: Arc::new(pipeline) }
-    }
-}
+pub struct StartServerTask;
 
 async fn json_bid_handler(
     req: Json<BidRequest>,
@@ -58,8 +50,9 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             tls_rate_per_worker: None,
         };
 
-        // Clone the Arc to share across all request handlers
-        let pipeline = Arc::clone(&self.pipeline);
+        let pipeline = ctx.rtb_pipeline.get()
+            .ok_or(anyhow::anyhow!("RTB pipeline not built"))?
+            .clone();
 
         let server = Server::listen(cfg, move |app| {
             app

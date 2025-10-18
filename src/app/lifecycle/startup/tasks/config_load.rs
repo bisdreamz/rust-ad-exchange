@@ -1,14 +1,15 @@
 use crate::app::lifecycle::context::StartupContext;
-use crate::app::core::config_manager::ConfigManager;
+use crate::core::config_manager::ConfigManager;
 use anyhow::Error;
 use pipeline::BlockingTask;
+use std::sync::Arc;
 
-pub (crate) struct ConfigLoadTask {
-    manager: ConfigManager,
+pub struct ConfigLoadTask {
+    manager: Arc<ConfigManager>
 }
 
 impl ConfigLoadTask {
-    pub fn new(manager: ConfigManager) -> Self {
+    pub fn new(manager: Arc<ConfigManager>) -> Self {
         Self { manager }
     }
 }

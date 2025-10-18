@@ -1,6 +1,8 @@
+use std::num::NonZeroU32;
 use anyhow::{anyhow, Error};
 use derive_builder::Builder;
 use fast_uaparser::{Device, OperatingSystem, ParserError};
+use moka::sync::Cache;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum DeviceType {
@@ -22,7 +24,9 @@ pub struct DeviceInfo {
     pub devtype: DeviceType
 }
 
-pub struct DeviceLookup;
+pub struct DeviceLookup {
+    cache: Cache<String, Option<DeviceInfo>>
+}
 
 fn extract_type(device_family: &str, os_family: &str) -> DeviceType {
     match device_family {
@@ -84,12 +88,17 @@ fn extract_type(device_family: &str, os_family: &str) -> DeviceType {
 }
 
 impl DeviceLookup {
-    pub fn try_new() -> Result<Self, Error> {
+    pub fn try_new(cache_sz: NonZeroU32) -> Result<Self, Error> {
         fast_uaparser::init()
-            .map(|_b| DeviceLookup)
+            .map(|_b| {
+                DeviceLookup {
+                    cache: Cache::new(cache_sz.get() as u64)
+                }
+            })
             .map_err(|e| anyhow!(e))
     }
-    pub fn lookup_ua(&self, user_agent: &String) -> Option<DeviceInfo> {
+
+    fn load(user_agent: &String) -> Option<DeviceInfo> {
         let device_res: Result<Device, ParserError> = user_agent.parse();
         let os_res: Result<OperatingSystem, ParserError> = user_agent.parse();
 
@@ -102,11 +111,19 @@ impl DeviceLookup {
 
         let devtype = extract_type(&device.family, &os.family);
 
-        Some(DeviceInfo {
+        let dev_info = DeviceInfo {
             brand: device.brand,
             model: device.model,
             os: Some(os.family),
             devtype,
+        };
+
+        Some(dev_info)
+    }
+
+    pub fn lookup_ua(&self, user_agent: &String) -> Option<DeviceInfo> {
+        self.cache.get_with(user_agent.clone(), || {
+            DeviceLookup::load(user_agent)
         })
     }
 }

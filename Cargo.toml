@@ -16,3 +16,9 @@ config = { version = "0.15.18", default-features = false, features = ["async", "
 parking_lot = "0.12.5"
 rust-device-detector = { git = "https://github.com/simplecastapps/rust-device-detector.git", branch = "main", features = ["cache"] }
 fast_uaparser = "2.0.1"
+moka = { version = "0.12.11", features = ["sync"] }
+ip_network_table = "0.2.0"
+reqwest = "0.12.24"
+ipnetwork = "0.21.1"
+arc-swap = "1.7.1"
+ip_network = "0.4.1"

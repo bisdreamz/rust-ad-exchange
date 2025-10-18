@@ -2,12 +2,12 @@ use std::path::PathBuf;
 use config::Config;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
-use crate::app::core::models::bidder::Bidder;
+use crate::core::models::bidder::Bidder;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
     // ssl, initial bidders, db details..
-    bidders: Vec<Bidder>
+    pub bidders: Vec<Bidder>
 }
 
 impl RexConfig {
