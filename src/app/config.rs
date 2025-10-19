@@ -32,6 +32,7 @@ pub struct RexConfig {
     pub bidders: Vec<BidderConfig>,
     #[serde(default)]
     pub logging: LoggingConfig,
+    pub schain_limit: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

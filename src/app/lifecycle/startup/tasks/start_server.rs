@@ -11,7 +11,7 @@ use rtb::server::{Server, ServerConfig};
 use rtb::BidRequest;
 use std::sync::Arc;
 use tracing::log::debug;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 pub struct StartServerTask;
 
@@ -25,7 +25,7 @@ async fn json_bid_handler(
 
     match &pipeline_result {
         Ok(_) => debug!("Request pipeline success"),
-        Err(e) => warn!("Request pipeline aborted: {:?}", e),
+        Err(e) => debug!("Request pipeline aborted: {}", e),
     }
 
     let brs = match ctx.res.take() {

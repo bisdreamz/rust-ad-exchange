@@ -11,4 +11,9 @@ mod bidder_matching;
 pub use bidder_matching::BidderMatchingTask;
 
 mod bidder_callouts;
+
 pub use bidder_callouts::BidderCalloutsTask;
+
+mod hops_filter;
+pub use hops_filter::SchainHopsGlobalFilter;
+
