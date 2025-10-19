@@ -1,13 +1,13 @@
+use crate::core::models::shaping::TrafficShaping;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
-use crate::core::models::shaping::TrafficShaping;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
 pub struct Targeting {
     pub geos: Vec<String>,
     pub banner: bool,
     pub video: bool,
-    pub native: bool
+    pub native: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -25,7 +25,7 @@ pub enum HttpProto {
 pub enum Encoding {
     Json,
     #[default]
-    Protobuf
+    Protobuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
@@ -47,5 +47,5 @@ pub struct Endpoint {
 pub struct Bidder {
     pub name: String,
     pub gzip: bool,
-    pub multi_imp: bool
+    pub multi_imp: bool,
 }

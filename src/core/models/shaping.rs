@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum Metric {
     Rpm,
     FillRate,
-    BidRate
+    BidRate,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -16,7 +16,7 @@ pub enum Feature {
     Domain,
     ZoneId,
     DeviceOs,
-    AdFormat
+    AdFormat,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -28,6 +28,6 @@ pub enum TrafficShaping {
     Tree {
         control_percent: usize,
         metric: Metric,
-        features: Vec<Feature>
-    }
+        features: Vec<Feature>,
+    },
 }

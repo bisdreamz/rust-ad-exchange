@@ -10,28 +10,33 @@ use rtb::server::json::JsonBidResponseState;
 use rtb::server::{Server, ServerConfig};
 use rtb::BidRequest;
 use std::sync::Arc;
+use tracing::log::debug;
+use tracing::{info, instrument, warn};
 
 pub struct StartServerTask;
 
 async fn json_bid_handler(
     req: Json<BidRequest>,
-    pipeline: web::Data<Arc<Pipeline<AuctionContext, anyhow::Error>>>
+    pipeline: web::Data<Arc<Pipeline<AuctionContext, anyhow::Error>>>,
 ) -> JsonBidResponseState {
     let mut ctx = AuctionContext::new(req.into_inner());
 
     let pipeline_result = pipeline.run(&ctx).await;
 
-    println!("pipeline result success? {:?}", pipeline_result.is_ok());
+    match &pipeline_result {
+        Ok(_) => debug!("Request pipeline success"),
+        Err(e) => warn!("Request pipeline aborted: {:?}", e),
+    }
 
     let brs = match ctx.res.take() {
-        Some (brs) => brs,
-        None => {
-            BidResponseState::NoBid {
-                desc: if pipeline_result.is_err() { "Failed processing req".into() } else {
-                    "No Bid".into()
-                }
-            }
-        }
+        Some(brs) => brs,
+        None => BidResponseState::NoBid {
+            desc: if pipeline_result.is_err() {
+                "Failed processing req".into()
+            } else {
+                "No Bid".into()
+            },
+        },
     };
 
     JsonBidResponseState(brs)
@@ -39,6 +44,7 @@ async fn json_bid_handler(
 
 #[async_trait]
 impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
+    #[instrument(skip_all, name = "start_server_task")]
     async fn run(&self, ctx: &StartupContext) -> Result<(), Error> {
         let cfg = ServerConfig {
             http_port: Some(80),
@@ -50,21 +56,24 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             tls_rate_per_worker: None,
         };
 
-        let pipeline = ctx.rtb_pipeline.get()
+        let pipeline = ctx
+            .rtb_pipeline
+            .get()
             .ok_or(anyhow::anyhow!("RTB pipeline not built"))?
             .clone();
 
         let server = Server::listen(cfg, move |app| {
-            app
-                .app_data(web::Data::new(pipeline.clone()))
+            app.app_data(web::Data::new(pipeline.clone()))
                 .route("/hi", web::get().to(|| async { "hi!" }))
                 .route("/br", web::post().to(json_bid_handler));
-        }).await?;
+        })
+        .await?;
 
-        ctx.server.set(server)
+        ctx.server
+            .set(server)
             .map_err(|_| anyhow!("Could not set server"))?;
 
-        println!("Started http server on port 80");
+        info!("Started http server, ready for requests");
 
         Ok(())
     }

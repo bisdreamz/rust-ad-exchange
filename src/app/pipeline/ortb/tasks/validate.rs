@@ -1,22 +1,33 @@
+use crate::app::pipeline::ortb::AuctionContext;
+use crate::child_span_info;
 use anyhow::anyhow;
 use pipeline::BlockingTask;
 use rtb::common::bidresponsestate::BidResponseState;
-use crate::app::pipeline::ortb::AuctionContext;
+use tracing::debug;
 
 pub struct ValidateRequestTask;
 
 impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
     fn run(&self, context: &AuctionContext) -> Result<(), anyhow::Error> {
+        let span = child_span_info!("request_validate_task").entered();
+
+        // TODO attach seller span context
+
         let req = context.req.read();
 
         if req.id.is_empty() {
             let brs = BidResponseState::NoBidReason {
                 reqid: "missing".into(),
                 nbr: rtb::spec::nobidreason::INVALID_REQUEST,
-                desc: Some("Missing req id".into())
+                desc: Some("Missing req id".into()),
             };
 
-            context.res.set(brs).expect("Should not have response state assigned already");
+            context
+                .res
+                .set(brs)
+                .expect("Should not have response state assigned already");
+
+            span.record("invalid_reason", "missing_auction_id");
 
             return Err(anyhow!("Auction missing id value"));
         }
@@ -26,10 +37,15 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
                 nbr: rtb::spec::nobidreason::INVALID_REQUEST,
-                desc: Some("Missing device object".into())
+                desc: Some("Missing device object".into()),
             };
 
-            context.res.set(brs).expect("Should not have response state assigned already");
+            context
+                .res
+                .set(brs)
+                .expect("Should not have response state assigned already");
+
+            span.record("invalid_reason", "missing_device_object");
 
             return Err(anyhow!("Auction missing device object"));
         }
@@ -40,10 +56,15 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
                 nbr: rtb::spec::nobidreason::INVALID_REQUEST,
-                desc: Some("Missing device user-agent".into())
+                desc: Some("Missing device user-agent".into()),
             };
 
-            context.res.set(brs).expect("Should not have response state assigned already");
+            context
+                .res
+                .set(brs)
+                .expect("Should not have response state assigned already");
+
+            span.record("invalid_reason", "missing_user_agent");
 
             return Err(anyhow!("Auction device object missing ua value"));
         }
@@ -52,10 +73,15 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
                 nbr: rtb::spec::nobidreason::INVALID_REQUEST,
-                desc: Some("Empty imps".into())
+                desc: Some("Empty imps".into()),
             };
 
-            context.res.set(brs).expect("Should not have response state assigned already");
+            context
+                .res
+                .set(brs)
+                .expect("Should not have response state assigned already");
+
+            span.record("invalid_reason", "missing_imps");
 
             return Err(anyhow!("Auction missing imps"));
         }
@@ -64,15 +90,21 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
                 nbr: rtb::spec::nobidreason::INVALID_REQUEST,
-                desc: Some("Missing app, site, or dooh object".into())
+                desc: Some("Missing app, site, or dooh object".into()),
             };
 
-            context.res.set(brs).expect("Should not have response state assigned already");
+            context
+                .res
+                .set(brs)
+                .expect("Should not have response state assigned already");
+
+            span.record("invalid_reason", "missing_app_site");
 
             return Err(anyhow!("Auction missing app, site, or dooh object"));
         }
 
-        println!("Request passed basic validation");
+        debug!("Request passed basic validation");
+        span.record("invalid_reason", "none");
 
         Ok(())
     }

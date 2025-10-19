@@ -2,8 +2,8 @@ use crate::app::config::RexConfig;
 use anyhow::Error;
 use parking_lot::{RwLock, RwLockReadGuard};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct ConfigManager {
     path: PathBuf,
@@ -15,7 +15,6 @@ pub struct ConfigManager {
 /// the local cfg file for changes.. this lets us do that
 /// if wanted
 impl ConfigManager {
-
     fn reload(&self) -> Result<(), Error> {
         let cfg = RexConfig::load(&self.path)?;
         *self.cfg.write() = cfg;

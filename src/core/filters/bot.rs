@@ -6,17 +6,22 @@ use moka::sync::Cache;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::log::debug;
 
-const DATA_URL: &str = "https://raw.githubusercontent.com/the-furry-hubofeverything/vps-ranges/refs/heads/main/ip.txt";
+const DATA_URL: &str =
+    "https://raw.githubusercontent.com/the-furry-hubofeverything/vps-ranges/refs/heads/main/ip.txt";
 
 pub struct IpRiskFilter {
     table: ArcSwap<IpNetworkTable<()>>,
     cache: Cache<String, bool>,
-    ranges: usize
+    ranges: usize,
 }
 
 impl IpRiskFilter {
-    pub async fn try_new(cache_max_size: usize, cache_ttl: Duration) -> Result<Self, anyhow::Error> {
+    pub async fn try_new(
+        cache_max_size: usize,
+        cache_ttl: Duration,
+    ) -> Result<Self, anyhow::Error> {
         if cache_max_size == 0 && cache_ttl.is_zero() {
             bail!("Cache max size and ttl cannot both be zero");
         }
@@ -33,7 +38,7 @@ impl IpRiskFilter {
         let mut filter = IpRiskFilter {
             table: ArcSwap::new(Arc::new(IpNetworkTable::new())),
             cache: cache_builder.build(),
-            ranges: 0
+            ranges: 0,
         };
 
         filter.load().await?;
@@ -65,7 +70,10 @@ impl IpRiskFilter {
         if success > 10000 {
             self.table.store(Arc::new(table))
         } else {
-            bail!("Suspiciously low successful line count {}, avoiding ip bot update", success)
+            bail!(
+                "Suspiciously low successful line count {}, avoiding ip bot update",
+                success
+            )
         }
 
         self.ranges = success;
@@ -74,9 +82,9 @@ impl IpRiskFilter {
     }
 
     pub fn should_block(&self, ip: IpAddr) -> bool {
-        println!("Checking {} for block", ip);
+        debug!("Checking {} for block", ip);
         self.cache.get_with(ip.to_string(), || {
-            println!("Loading {}", ip);
+            debug!("Loading {}", ip);
             self.table.load().longest_match(ip).is_some()
         })
     }
@@ -84,5 +92,4 @@ impl IpRiskFilter {
     pub fn ranges(&self) -> usize {
         self.ranges
     }
-
 }

@@ -9,9 +9,17 @@ pub struct BidderManager {
 impl BidderManager {
     pub fn new(config_manager: &ConfigManager) -> Self {
         BidderManager {
-            bidders: config_manager.get().bidders.iter().map(|b| {
-                (Arc::new(b.bidder.clone()), b.endpoints.iter().map(|e| Arc::new(e.clone())).collect())
-            }).collect(),
+            bidders: config_manager
+                .get()
+                .bidders
+                .iter()
+                .map(|b| {
+                    (
+                        Arc::new(b.bidder.clone()),
+                        b.endpoints.iter().map(|e| Arc::new(e.clone())).collect(),
+                    )
+                })
+                .collect(),
         }
     }
 

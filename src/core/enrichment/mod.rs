@@ -1,2 +1,2 @@
-pub mod ua_deprecated;
 pub mod device;
+pub mod ua_deprecated;

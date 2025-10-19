@@ -3,6 +3,10 @@ name = "rex"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+otel-http = ["opentelemetry-otlp/http-proto"]
+
 [dependencies]
 rtb-runtime = { path = "../openrtb-rs", features = ["actix-web"] }
 pipeline = {  path = "../pipeline" }
@@ -19,6 +23,13 @@ fast_uaparser = "2.0.1"
 moka = { version = "0.12.11", features = ["sync"] }
 ip_network_table = "0.2.0"
 reqwest = "0.12.24"
-ipnetwork = "0.21.1"
 arc-swap = "1.7.1"
 ip_network = "0.4.1"
+tracing = { version = "0.1.41", features = ["async-await", "log", "release_max_level_info"] }
+opentelemetry = "0.31.0"
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
+tracing-appender = "0.2.3"
+tracing-opentelemetry = "0.32.0"
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+rand = "0.9.2"

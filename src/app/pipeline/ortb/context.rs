@@ -3,18 +3,23 @@ use parking_lot::{Mutex, RwLock};
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
 use std::sync::{Arc, OnceLock};
+use derive_builder::Builder;
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub enum BidderResponseState {
+    #[default]
     Timeout,
     Error(u32, String),
     NoBid(Option<u32>),
     Bid(BidResponse),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct BidderResponse {
     endpoint: Endpoint,
     state: BidderResponseState,
-    latency: u32
+    latency: u32,
 }
 
 /// Bidder context
@@ -27,11 +32,12 @@ pub struct BidderResponse {
 /// * `req` - Cloned bidrequest(s) which is where bidder specific adapted
 /// request are stored and safe to mutate, e.g. are margins or tagid changes.
 /// Can be multiple requests in case of behavior such as imp request breakout.
+#[derive(Debug, Default)]
 pub struct BidderContext {
     pub bidder: Arc<Bidder>,
     pub endpoints: Vec<Arc<Endpoint>>,
     pub reqs: Mutex<Vec<BidRequest>>,
-    pub response: Mutex<BidderResponseState>
+    pub response: Mutex<BidderResponseState>,
 }
 
 /// Top level auction context object which carries all context required
@@ -45,6 +51,7 @@ pub struct BidderContext {
 /// * `bidders` - The list of [`BidderContext`] assigned by the bidder matching stage,
 /// and optionally further modified by other stages, which contains the list of bidders
 /// and bidder specific adapted request objects
+#[derive(Debug, Default)]
 pub struct AuctionContext {
     pub req: RwLock<BidRequest>,
     pub res: OnceLock<BidResponseState>,
@@ -52,7 +59,7 @@ pub struct AuctionContext {
 }
 
 impl AuctionContext {
-    pub fn new (req: BidRequest) -> AuctionContext {
+    pub fn new(req: BidRequest) -> AuctionContext {
         AuctionContext {
             req: RwLock::new(req),
             res: OnceLock::new(),

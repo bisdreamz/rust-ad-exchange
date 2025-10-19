@@ -1,17 +1,20 @@
-use crate::core::filters::bot::IpRiskFilter;
-use rtb::server::Server;
-use std::sync::{Arc, Mutex, OnceLock};
-use anyhow::Error;
-use pipeline::Pipeline;
 use crate::app::config::RexConfig;
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::core::enrichment::device::DeviceLookup;
+use crate::core::filters::bot::IpRiskFilter;
 use crate::core::managers::bidders::BidderManager;
+use anyhow::Error;
+use pipeline::Pipeline;
+use rtb::server::Server;
+use std::sync::{Arc, Mutex, OnceLock};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 
 #[derive(Default)]
 pub struct StartupContext {
     /// Local config options
     pub config: OnceLock<RexConfig>,
+    /// Observability provider so it can be properly flushed at shutdown
+    pub observability: OnceLock<SdkTracerProvider>,
 
     // Transient items that are assigned but taken ownership of later
     /// Ip bot filter, pipeline takes ownership of it later

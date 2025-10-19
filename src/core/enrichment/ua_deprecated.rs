@@ -1,14 +1,14 @@
-use rust_device_detector::device_detector::{DeviceDetector, KnownDevice};
 use crate::core::enrichment::device::{DeviceInfo, DeviceType};
+use rust_device_detector::device_detector::{DeviceDetector, KnownDevice};
 
 pub struct DeviceLookupOld {
-    ua: DeviceDetector
+    ua: DeviceDetector,
 }
 
 #[allow(dead_code)]
 impl DeviceLookupOld {
-
-    const UA_SAMPLE: &'static str = "Dalvik/2.1.0 (Linux; U; Android 14; SM-X306B Build/UP1A.231005.007)";
+    const UA_SAMPLE: &'static str =
+        "Dalvik/2.1.0 (Linux; U; Android 14; SM-X306B Build/UP1A.231005.007)";
 
     pub fn new(cache_sz: usize) -> Self {
         assert!(cache_sz > 0, "cache sz must be greater than 0");
@@ -16,22 +16,22 @@ impl DeviceLookupOld {
         let lookup = DeviceDetector::new_with_cache(cache_sz as u64);
 
         // Important because data apparently only loads upon first lookup
-        lookup.parse(Self::UA_SAMPLE, None).expect("Priming UA lookup should succeed");
+        lookup
+            .parse(Self::UA_SAMPLE, None)
+            .expect("Priming UA lookup should succeed");
 
-        DeviceLookupOld {
-            ua: lookup
-        }
+        DeviceLookupOld { ua: lookup }
     }
 
     fn extract_devtype(known_device: &KnownDevice) -> DeviceType {
-        if known_device.is_desktop()
-            || known_device.is_notebook() {
+        if known_device.is_desktop() || known_device.is_notebook() {
             return DeviceType::Desktop;
         } else if known_device.is_feature_phone()
             || known_device.is_mobile()
             || known_device.is_mobile_app()
             || known_device.is_phablet()
-            || known_device.is_smart_phone() {
+            || known_device.is_smart_phone()
+        {
             return DeviceType::Phone;
         } else if known_device.is_tablet() {
             return DeviceType::Tablet;
@@ -39,7 +39,8 @@ impl DeviceLookupOld {
             return DeviceType::Tv;
         } else if known_device.is_console()
             || known_device.is_media_player()
-            || known_device.is_smart_display() {
+            || known_device.is_smart_display()
+        {
             return DeviceType::SetTop;
         }
 
@@ -68,7 +69,10 @@ impl DeviceLookupOld {
 
         println!("5. not a bot, getting known device");
         let known_device_opt = detection.get_known_device();
-        println!("6. got known_device_opt, is_some: {}", known_device_opt.is_some());
+        println!(
+            "6. got known_device_opt, is_some: {}",
+            known_device_opt.is_some()
+        );
 
         if known_device_opt.is_none() {
             println!("7. no known device, returning Unknown");
@@ -100,7 +104,7 @@ impl DeviceLookupOld {
             brand,
             model,
             os,
-            devtype
+            devtype,
         })
     }
 }
