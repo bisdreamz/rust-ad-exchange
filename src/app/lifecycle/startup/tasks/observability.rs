@@ -9,13 +9,16 @@ pub struct ConfigureObservabilityTask;
 impl BlockingTask<StartupContext, Error> for ConfigureObservabilityTask {
     fn run(&self, context: &StartupContext) -> Result<(), Error> {
         // Get config from context
-        let config = context.config.get()
-            .ok_or_else(|| anyhow::anyhow!("Config not loaded before observability initialization"))?;
+        let config = context.config.get().ok_or_else(|| {
+            anyhow::anyhow!("Config not loaded before observability initialization")
+        })?;
 
         // a provider is returned if otel export is configured
         // but observability may still have valid logging etc
-        if let Some(provider) = observability::init(&config.logging)? {
-            context.observability.set(provider)
+        if let Some(handles) = observability::init(&config.logging)? {
+            context
+                .observability
+                .set(handles)
                 .map_err(|_| anyhow::anyhow!("Observability context already initialized"))?
         }
 

@@ -1,8 +1,8 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::child_span_info;
 use crate::core::filters::bot::IpRiskFilter;
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
+use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use std::net::IpAddr;
 use tracing::debug;
@@ -19,7 +19,8 @@ impl IpBlockTask {
 
 impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let span = child_span_info!("ip_block_task").entered();
+        let span =
+            child_span_info!("ip_block_task", ip_block_reason = tracing::field::Empty).entered();
 
         let req_borrow = context.req.read();
         let dev_ip = &req_borrow.device.as_ref().expect("Should have device").ip;

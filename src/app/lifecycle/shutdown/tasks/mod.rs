@@ -1,2 +1,2 @@
-pub mod stop_server;
 pub mod observability;
+pub mod stop_server;

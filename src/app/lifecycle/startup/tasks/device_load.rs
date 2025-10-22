@@ -1,6 +1,6 @@
 use crate::app::context::StartupContext;
 use crate::core::enrichment::device::DeviceLookup;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use std::num::NonZeroU32;

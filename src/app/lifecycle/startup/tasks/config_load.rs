@@ -1,6 +1,6 @@
 use crate::app::lifecycle::context::StartupContext;
 use crate::core::config_manager::ConfigManager;
-use anyhow::{format_err, Error};
+use anyhow::{Error, format_err};
 use pipeline::BlockingTask;
 use std::sync::Arc;
 use tracing::instrument;

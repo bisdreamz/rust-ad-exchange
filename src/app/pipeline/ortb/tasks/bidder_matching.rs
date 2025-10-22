@@ -1,13 +1,13 @@
-use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::child_span_info;
+use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
 use crate::core::managers::bidders::BidderManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use parking_lot::Mutex;
 use pipeline::BlockingTask;
-use rtb::common::bidresponsestate::BidResponseState;
 use rtb::BidRequest;
+use rtb::child_span_info;
+use rtb::common::bidresponsestate::BidResponseState;
 use std::sync::Arc;
 use tracing::log::debug;
 
@@ -21,7 +21,13 @@ impl BidderMatchingTask {
     }
 
     fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> bool {
-        let span = child_span_info!("bidder_endpoint_matching_task").entered();
+        let span = child_span_info!(
+            "bidder_endpoint_matching_task",
+            bidder_name = tracing::field::Empty,
+            endpoint_name = tracing::field::Empty,
+            bidder_endpoint_filter_reason = tracing::field::Empty
+        )
+        .entered();
 
         span.record("bidder_name", &bidder.name);
         span.record("endpoint_name", &endpoint.name);
@@ -92,16 +98,24 @@ impl BidderMatchingTask {
 
 impl BlockingTask<AuctionContext, Error> for BidderMatchingTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let span = child_span_info!("bidder_matching_task");
+        let span = child_span_info!(
+            "bidder_matching_task",
+            bidder_matches_count = tracing::field::Empty,
+            endpoints_matches_count = tracing::field::Empty,
+            matches = tracing::field::Empty
+        )
+        .entered();
 
         let matches =
             Self::get_filtered_matching(self.manager.bidders().as_ref(), &*context.req.read());
 
         if !span.is_disabled() {
             span.record("bidder_matches_count", matches.len());
-            span.record("endpoints_matches_count", matches.iter()
-                .map(|(_, e)| e.len()).sum::<usize>());
-                span.record("matches", tracing::field::debug(&matches));
+            span.record(
+                "endpoints_matches_count",
+                matches.iter().map(|(_, e)| e.len()).sum::<usize>(),
+            );
+            span.record("matches", tracing::field::debug(&matches));
         }
 
         if matches.is_empty() {

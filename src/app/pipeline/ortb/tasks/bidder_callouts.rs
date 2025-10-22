@@ -1,8 +1,8 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::child_span_info;
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
+use rtb::child_span_info;
 use tracing::{info, warn};
 
 pub struct BidderCalloutsTask;
@@ -10,7 +10,8 @@ pub struct BidderCalloutsTask;
 #[async_trait]
 impl AsyncTask<AuctionContext, Error> for BidderCalloutsTask {
     async fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let span = child_span_info!("bidder_callouts_task").entered();
+        let span =
+            child_span_info!("bidder_callouts_task", bidders = tracing::field::Empty).entered();
         let bidders = context.bidders.lock();
 
         // TODO simplify the entries here

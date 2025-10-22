@@ -1,17 +1,26 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::child_span_info;
 use anyhow::anyhow;
 use pipeline::BlockingTask;
+use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub struct ValidateRequestTask;
 
 impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
     fn run(&self, context: &AuctionContext) -> Result<(), anyhow::Error> {
-        let span = child_span_info!("request_validate_task").entered();
+        let span = child_span_info!(
+            "request_validate_task",
+            invalid_reason = tracing::field::Empty
+        )
+        .entered();
 
         // TODO attach seller span context
+
+        info!(
+            "Validating request for seller {} source {}",
+            context.pubid, context.source
+        );
 
         let req = context.req.read();
 

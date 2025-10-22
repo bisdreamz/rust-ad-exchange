@@ -3,4 +3,4 @@ mod pipeline;
 mod tasks;
 
 pub use context::AuctionContext;
-pub use pipeline::build_rtb_pipeline;
+pub use pipeline::build_auction_pipeline;

@@ -64,11 +64,8 @@ impl Default for FileRotation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogSink {
-    /// Whether spans should be exported to this sink
-    pub spans: bool,
-    // maybe have metrics here later
-    /// The kind of observability sink
-    pub dest: LogType
+    #[serde(flatten)]
+    pub dest: LogType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +76,8 @@ pub enum LogType {
         color: bool,
         #[serde(default)]
         json: bool,
+        #[serde(default = "default_true")]
+        spans: bool,
     },
     File {
         path: PathBuf,
@@ -88,16 +87,36 @@ pub enum LogType {
         rotation: FileRotation,
         #[serde(default)]
         max_files: usize,
+        #[serde(default = "default_true")]
+        spans: bool,
     },
     Otel {
         endpoint: String,
         #[serde(default)]
         proto: OtelProto,
+        #[serde(default = "default_true")]
+        spans: bool,
+        #[serde(default)]
+        logs: bool,
+        #[serde(default = "default_true")]
+        metrics: bool,
+        #[serde(default = "default_metrics_interval")]
+        metrics_interval_secs: u32,
+        #[serde(default)]
+        headers: std::collections::HashMap<String, String>,
     },
 }
 
 fn default_logtype_color() -> bool {
     true
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_metrics_interval() -> u32 {
+    5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,15 +134,13 @@ impl Default for LoggingConfig {
         Self {
             level: "info".to_string(),
             span_sample_rate: 0.01,
-            sinks: vec![
-                LogSink {
+            sinks: vec![LogSink {
+                dest: LogType::Stdout {
+                    color: true,
+                    json: false,
                     spans: true,
-                    dest: LogType::Stdout {
-                        color: true,
-                        json: false,
-                    }
-                }
-            ],
+                },
+            }],
         }
     }
 }
@@ -136,12 +153,19 @@ impl LoggingConfig {
         }
 
         // Validate level can be parsed
-        self.level.parse::<tracing::Level>()
-            .map_err(|_| anyhow::anyhow!("Invalid log level: '{}'. Valid levels: trace, debug, info, warn, error", self.level))?;
+        self.level.parse::<tracing::Level>().map_err(|_| {
+            anyhow::anyhow!(
+                "Invalid log level: '{}'. Valid levels: trace, debug, info, warn, error",
+                self.level
+            )
+        })?;
 
         // Validate sample rate
         if !(0.0..=1.0).contains(&self.span_sample_rate) {
-            anyhow::bail!("span_sample_rate must be between 0.0 and 1.0, got {}", self.span_sample_rate);
+            anyhow::bail!(
+                "span_sample_rate must be between 0.0 and 1.0, got {}",
+                self.span_sample_rate
+            );
         }
 
         Ok(())

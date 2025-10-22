@@ -16,7 +16,9 @@ impl<T: Send + Sync> WrappedPipelineTask<T> {
     /// Create a wrapped pipeline that will execute
     /// under the resulting span from the span provider
     pub fn new<F>(pipeline: Pipeline<T, Error>, span_provider: F) -> Self
-    where F: Fn() -> Span + Sync + Send + 'static {
+    where
+        F: Fn() -> Span + Sync + Send + 'static,
+    {
         WrappedPipelineTask {
             pipeline,
             span_provider: Box::new(span_provider),
@@ -25,7 +27,7 @@ impl<T: Send + Sync> WrappedPipelineTask<T> {
 }
 
 #[async_trait]
-impl <T: Send + Sync> AsyncTask<T, Error> for WrappedPipelineTask<T> {
+impl<T: Send + Sync> AsyncTask<T, Error> for WrappedPipelineTask<T> {
     async fn run(&self, context: &T) -> Result<(), Error> {
         let span = (self.span_provider)();
 

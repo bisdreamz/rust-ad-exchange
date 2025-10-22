@@ -15,5 +15,5 @@ mod bidder_callouts;
 pub use bidder_callouts::BidderCalloutsTask;
 
 mod hops_filter;
-pub use hops_filter::SchainHopsGlobalFilter;
 
+pub use hops_filter::SchainHopsGlobalFilter;

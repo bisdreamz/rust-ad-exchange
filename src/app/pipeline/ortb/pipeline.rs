@@ -1,7 +1,7 @@
 use crate::app::context::StartupContext;
 use crate::app::pipeline::ortb::tasks::SchainHopsGlobalFilter;
-use crate::app::pipeline::ortb::{tasks, AuctionContext};
-use anyhow::{anyhow, bail, Error};
+use crate::app::pipeline::ortb::{AuctionContext, tasks};
+use anyhow::{Error, anyhow, bail};
 use pipeline::{Pipeline, PipelineBuilder};
 
 /// Builds the pipeline for which an openrtb request flows through for auction handling.
@@ -16,7 +16,9 @@ use pipeline::{Pipeline, PipelineBuilder};
 /// * Flow - If early timeout, blocked IP etc, pipeline will attach associated context 'res'
 /// and return an error, aborting the remainder of the pipeline.
 /// TODO parent pipeline to capture resulting context and log to db
-pub fn build_rtb_pipeline(context: &StartupContext) -> Result<Pipeline<AuctionContext, Error>, Error> {
+pub fn build_auction_pipeline(
+    context: &StartupContext,
+) -> Result<Pipeline<AuctionContext, Error>, Error> {
     let ip_risk_filter = context
         .ip_risk_filter
         .lock()
@@ -36,8 +38,9 @@ pub fn build_rtb_pipeline(context: &StartupContext) -> Result<Pipeline<AuctionCo
         None => bail!("No Bidder Manager?! Cant build rtb pipeline"),
     };
 
-    let config = context.config.get()
-        .ok_or(anyhow!("RTB pipeline config not set when configuring rtb pipeline"))?;
+    let config = context.config.get().ok_or(anyhow!(
+        "RTB pipeline config not set when configuring rtb pipeline"
+    ))?;
 
     let rtb_pipeline = PipelineBuilder::new()
         .with_blocking(Box::new(tasks::ValidateRequestTask))

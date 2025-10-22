@@ -1,9 +1,9 @@
 use crate::app::pipeline::ortb::context::AuctionContext;
-use crate::child_span_info;
 use crate::core::enrichment::device::{DeviceLookup, DeviceType};
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::bid_request::Device;
+use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use tracing::log::debug;
 
@@ -23,7 +23,14 @@ impl DeviceLookupTask {
 
 impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let span = child_span_info!("device_lookup_task").entered();
+        let span = child_span_info!(
+            "device_lookup_task",
+            dev_lookup_result = tracing::field::Empty,
+            dev_make = tracing::field::Empty,
+            dev_model = tracing::field::Empty,
+            dev_os = tracing::field::Empty,
+            dev_type = tracing::field::Empty,
+        ).entered();
 
         let req_borrow = context.req.read();
         let dev_borrow = req_borrow.device.as_ref().expect("Should have device!");

@@ -1,10 +1,10 @@
 use crate::core::models::bidder::{Bidder, Endpoint};
+use derive_builder::Builder;
 use parking_lot::{Mutex, RwLock};
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
-use std::sync::{Arc, OnceLock};
-use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub enum BidderResponseState {
@@ -53,14 +53,19 @@ pub struct BidderContext {
 /// and bidder specific adapted request objects
 #[derive(Debug, Default)]
 pub struct AuctionContext {
+    /// Tag to describe the inbound source of this request, e.g. rtb, rtb_protobuf, prebid, etc
+    pub source: String,
+    pub pubid: String,
     pub req: RwLock<BidRequest>,
     pub res: OnceLock<BidResponseState>,
     pub bidders: Mutex<Vec<BidderContext>>,
 }
 
 impl AuctionContext {
-    pub fn new(req: BidRequest) -> AuctionContext {
+    pub fn new(source: String, pubid: String, req: BidRequest) -> AuctionContext {
         AuctionContext {
+            pubid,
+            source,
             req: RwLock::new(req),
             res: OnceLock::new(),
             bidders: Mutex::new(Vec::new()),

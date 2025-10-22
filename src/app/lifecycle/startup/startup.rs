@@ -1,5 +1,6 @@
 use crate::app::lifecycle::context::StartupContext;
 use crate::app::lifecycle::startup::tasks::config_load::ConfigLoadTask;
+use crate::app::span::WrappedPipelineTask;
 use crate::app::startup::tasks::bidders_load::BidderManagerLoadTask;
 use crate::app::startup::tasks::device_load::DeviceLookupLoadTask;
 use crate::app::startup::tasks::ip_risk_load::IpRiskLoadTask;
@@ -10,8 +11,7 @@ use crate::core::config_manager::ConfigManager;
 use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info_span, Span};
-use crate::app::span::WrappedPipelineTask;
+use tracing::{Span, info_span};
 
 /// Builds the graceful ordering of startup tasks required for a successful startup.
 /// Configures logging, builds the request pipelines, all that good stuff
@@ -37,11 +37,10 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .build()
         .expect("Startup pipeline should have tasks!");
 
-    let nop_bootloader_pipeline = WrappedPipelineTask::new(
-        boot_loader, || Span::none());
+    let nop_bootloader_pipeline = WrappedPipelineTask::new(boot_loader, || Span::none());
 
-    let observed_startup_pipeline = WrappedPipelineTask::new(
-        start_pipeline, || info_span!("start_pipeline"));
+    let observed_startup_pipeline =
+        WrappedPipelineTask::new(start_pipeline, || info_span!("start_pipeline"));
 
     PipelineBuilder::new()
         .with_async(Box::new(nop_bootloader_pipeline))
