@@ -5,15 +5,15 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::app::config::{FileRotation, LogType, LoggingConfig, OtelProto};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use http::Uri;
-use opentelemetry::{KeyValue, global, trace::TracerProvider};
+use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+use opentelemetry_sdk::Resource;
 use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
 use tonic::transport::ClientTlsConfig;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
@@ -21,7 +21,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::layer::{Layer, Layered, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Registry, fmt};
+use tracing_subscriber::{fmt, EnvFilter, Registry};
 
 type FilteredRegistry = Layered<EnvFilter, Registry>;
 type DynLayer = Box<dyn Layer<FilteredRegistry> + Send + Sync + 'static>;
@@ -160,22 +160,14 @@ pub fn init(config: &LoggingConfig) -> Result<Option<ObservabilityProviders>> {
 
 pub fn shutdown(handles: &ObservabilityProviders) -> Result<()> {
     if let Some(tracer) = handles.tracer.as_ref() {
-        tracer
-            .shutdown()
-            .context("failed to shutdown tracer provider")?;
+        let _ = tracer.shutdown();
     }
 
     if let Some(meter) = handles.meter.as_ref() {
-        meter
-            .shutdown()
-            .context("failed to shutdown meter provider")?;
+        let _ = meter.shutdown();
     }
 
-    if let Some(logger) = handles.logger.as_ref() {
-        logger
-            .shutdown()
-            .context("failed to shutdown logger provider")?;
-    }
+    // TODO logs shutdown fails for direct otel exporters - perhaps because still being used?
 
     Ok(())
 }
@@ -357,8 +349,16 @@ fn configure_otel(
             .with_batch_exporter(exporter)
             .build();
 
-        let appender_layer: DynLayer = Box::new(OpenTelemetryTracingBridge::new(&logger_provider));
-        logs_layer = Some(appender_layer);
+        // Filter OTEL SDK logs from looping back to OTEL (prevents circular dependencies)
+        let appender_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+        let filtered_layer: DynLayer = Box::new(
+            appender_layer.with_filter(
+                tracing_subscriber::filter::filter_fn(|metadata| {
+                    !metadata.target().starts_with("opentelemetry")
+                })
+            )
+        );
+        logs_layer = Some(filtered_layer);
         logger = Some(logger_provider);
     }
 
