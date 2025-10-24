@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::app::config::{FileRotation, LogType, LoggingConfig, OtelProto};
+use actix_web::rt::task::spawn_blocking;
 use anyhow::{anyhow, Context, Result};
 use http::Uri;
 use opentelemetry::{global, trace::TracerProvider, KeyValue};
@@ -16,6 +17,7 @@ use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
 use tonic::transport::ClientTlsConfig;
+use tracing::{error, info};
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriter;
@@ -28,6 +30,7 @@ type DynLayer = Box<dyn Layer<FilteredRegistry> + Send + Sync + 'static>;
 
 static APPENDER_GUARDS: OnceLock<Vec<WorkerGuard>> = OnceLock::new();
 
+#[derive(Clone)]
 pub struct ObservabilityProviders {
     pub tracer: Option<SdkTracerProvider>,
     pub meter: Option<SdkMeterProvider>,
@@ -158,16 +161,51 @@ pub fn init(config: &LoggingConfig) -> Result<Option<ObservabilityProviders>> {
     }))
 }
 
-pub fn shutdown(handles: &ObservabilityProviders) -> Result<()> {
-    if let Some(tracer) = handles.tracer.as_ref() {
-        let _ = tracer.shutdown();
+pub async fn shutdown(handles: &ObservabilityProviders) -> Result<()> {
+    if let Some(meter) = handles.meter.clone() {
+        info!("Flushing metrics");
+        match spawn_blocking(move || meter.shutdown()).await {
+            Ok(Ok(())) => info!("Meter provider shutdown complete"),
+            Ok(Err(e)) => {
+                error!("Meter provider shutdown failed: {}", e);
+                return Err(anyhow!("failed to shutdown meter provider: {}", e));
+            }
+            Err(join_err) => {
+                error!("Meter shutdown task failed: {}", join_err);
+                return Err(anyhow!("meter shutdown task failed: {}", join_err));
+            }
+        }
     }
 
-    if let Some(meter) = handles.meter.as_ref() {
-        let _ = meter.shutdown();
+    if let Some(tracer) = handles.tracer.clone() {
+        info!("Flushing traces");
+        match spawn_blocking(move || tracer.shutdown()).await {
+            Ok(Ok(())) => info!("Tracer provider shutdown complete"),
+            Ok(Err(e)) => {
+                error!("Tracer provider shutdown failed: {}", e);
+                return Err(anyhow!("failed to shutdown tracer provider: {}", e));
+            }
+            Err(join_err) => {
+                error!("Tracer shutdown task failed: {}", join_err);
+                return Err(anyhow!("tracer shutdown task failed: {}", join_err));
+            }
+        }
     }
 
-    // TODO logs shutdown fails for direct otel exporters - perhaps because still being used?
+    if let Some(logger) = handles.logger.clone() {
+        info!("Flushing logs");
+        match spawn_blocking(move || logger.shutdown_with_timeout(Duration::from_secs(3))).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                eprintln!("Logger provider shutdown failed: {}", e);
+                return Err(anyhow!("failed to shutdown logger provider: {}", e));
+            }
+            Err(join_err) => {
+                eprintln!("Logger shutdown task failed: {}", join_err);
+                return Err(anyhow!("logger shutdown task failed: {}", join_err));
+            }
+        }
+    }
 
     Ok(())
 }

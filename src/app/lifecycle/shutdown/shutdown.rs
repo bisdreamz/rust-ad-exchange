@@ -10,7 +10,7 @@ use tracing::info_span;
 pub fn build_shutdown_pipeline() -> Pipeline<StartupContext, anyhow::Error> {
     let shutdown_pipeline = PipelineBuilder::new()
         .with_async(Box::new(StopServerTask))
-        .with_blocking(Box::new(ObservabilityShutdownTask))
+        .with_async(Box::new(ObservabilityShutdownTask))
         .build()
         .expect("Shutdown pipeline should have tasks!");
 

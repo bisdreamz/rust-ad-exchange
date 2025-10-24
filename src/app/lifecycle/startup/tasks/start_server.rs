@@ -2,15 +2,16 @@ use crate::app::lifecycle::context::StartupContext;
 use crate::app::pipeline::ortb::AuctionContext;
 use actix_web::web;
 use actix_web::web::Json;
-use anyhow::{Error, anyhow};
+use actix_web::HttpRequest;
+use anyhow::{anyhow, Error};
 use async_trait::async_trait;
-use opentelemetry::metrics::Counter;
-use opentelemetry::{KeyValue, global};
+use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::{global, KeyValue};
 use pipeline::{AsyncTask, Pipeline};
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::json::JsonBidResponseState;
 use rtb::server::{Server, ServerConfig};
-use rtb::{BidRequest, sample_or_attach_root_span};
+use rtb::{sample_or_attach_root_span, BidRequest};
 use std::sync::{Arc, LazyLock};
 use tracing::log::debug;
 use tracing::{info, instrument};
@@ -23,18 +24,29 @@ static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static REQUEST_DURATION: LazyLock<Histogram<f64>> = LazyLock::new(|| {
+    global::meter("rex")
+        .f64_histogram("http.server.duration")
+        .with_description("HTTP request duration")
+        .with_unit("s")
+        .build()
+});
+
 pub struct StartServerTask;
 
-fn record_request_metric(pubid: String, source: &str, brs: &BidResponseState, pipeline_ok: bool) {
+fn record_request_metric(path: String, source: &str, pubid: String, brs: &BidResponseState, pipeline_ok: bool,
+                         duration: std::time::Duration) {
     let mut attrs = vec![
         KeyValue::new("pubid", pubid),
         KeyValue::new("source", source.to_string()),
         KeyValue::new("pipeline_completed", pipeline_ok),
     ];
 
+    let mut status_code = 204;
     match brs {
         BidResponseState::Bid(_) => {
             attrs.push(KeyValue::new("outcome", "bid"));
+            status_code = 200;
         }
         BidResponseState::NoBid { desc } => {
             attrs.push(KeyValue::new("outcome", "no_bid"));
@@ -48,6 +60,11 @@ fn record_request_metric(pubid: String, source: &str, brs: &BidResponseState, pi
     }
 
     REQUESTS_TOTAL.add(1, &attrs);
+
+    attrs.push(KeyValue::new("http.response.status_code", status_code));
+    attrs.push(KeyValue::new("http.route", path));
+
+    REQUEST_DURATION.record(duration.as_secs_f64(), &attrs);
 }
 
 async fn handle_bid_request(
@@ -87,21 +104,25 @@ async fn handle_bid_request(
 async fn json_bid_handler(
     pubid: String,
     req: Json<BidRequest>,
+    http_req: HttpRequest,
     pipeline: Arc<Pipeline<AuctionContext, anyhow::Error>>,
     span_sample_rate: f32,
 ) -> JsonBidResponseState {
-    let source = "rtb_json".to_string();
+    let source = http_req.match_pattern().unwrap_or("unknown".to_string());
+    let start = std::time::Instant::now();
+    let path = http_req.path().to_string();
 
     let (brs, pipeline_completed) = handle_bid_request(
         pubid.clone(),
-        source.clone(),
+        path.clone(),
         req.into_inner(),
         pipeline.clone(),
         span_sample_rate,
     )
     .await;
 
-    record_request_metric(pubid, &source, &brs, pipeline_completed);
+    let duration = start.elapsed();
+    record_request_metric(path, &source, pubid, &brs, pipeline_completed, duration);
 
     JsonBidResponseState(brs)
 }
@@ -138,10 +159,10 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                 "/br/json/{pubid}",
                 web::post().to({
                     let pipeline = rtb_pipeline.clone();
-                    move |pubid: web::Path<String>, req: Json<BidRequest>| {
+                    move |pubid: web::Path<String>, req: Json<BidRequest>, http_req: HttpRequest| {
                         let pubid = pubid.into_inner();
                         let p = pipeline.clone();
-                        async move { json_bid_handler(pubid, req, p, span_sample_rate).await }
+                        async move { json_bid_handler(pubid, req, http_req, p, span_sample_rate).await }
                     }
                 }),
             );
