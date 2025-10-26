@@ -1,8 +1,8 @@
 use crate::app::context::StartupContext;
 use crate::app::pipeline::ortb::tasks::{BidSettlementTask, MultiImpBreakoutTask};
-use crate::app::pipeline::ortb::{tasks, AuctionContext};
+use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use pipeline::{Pipeline, PipelineBuilder};
 
 /// Builds the pipeline for which an openrtb request flows through for auction handling.
@@ -47,7 +47,9 @@ pub fn build_auction_pipeline(
 
     let rtb_pipeline = PipelineBuilder::new()
         .with_blocking(Box::new(tasks::ValidateRequestTask))
-        .with_blocking(Box::new(tasks::SchainHopsGlobalFilter::new(config.schain_limit)))
+        .with_blocking(Box::new(tasks::SchainHopsGlobalFilter::new(
+            config.schain_limit,
+        )))
         .with_blocking(Box::new(tasks::IpBlockTask::new(ip_risk_filter)))
         .with_blocking(Box::new(tasks::DeviceLookupTask::new(device_lookup)))
         .with_async(Box::new(tasks::BidderMatchingTask::new(
