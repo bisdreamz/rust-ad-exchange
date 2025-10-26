@@ -1,25 +1,39 @@
 use crate::core::models::bidder::{Bidder, Endpoint};
 use derive_builder::Builder;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub enum BidderResponseState {
+    /// Bidder failed to respond within time
     #[default]
     Timeout,
-    Error(u32, String),
+    /// Error experienced sending request such as broken url, bad dns
+    Error(String),
+    /// Unknown or unexpected http status response (status code, reason message)
+    Unknown(u32, String),
+    /// No bid received as defined by http 204 of 200 with empty seatbid.
+    /// Nbr present if provided in response.
     NoBid(Option<u32>),
+    /// Valid bid received as defined by an http 200 with non empty seatbid
     Bid(BidResponse),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct BidderResponse {
-    endpoint: Endpoint,
-    state: BidderResponseState,
-    latency: u32,
+    pub state: BidderResponseState,
+    pub latency: Duration,
+}
+
+#[derive(Debug, Default)]
+pub struct BidderCallout {
+    pub endpoint: Arc<Endpoint>,
+    pub req: BidRequest,
+    pub response: OnceLock<BidderResponse>,
 }
 
 /// Bidder context
@@ -35,9 +49,7 @@ pub struct BidderResponse {
 #[derive(Debug, Default)]
 pub struct BidderContext {
     pub bidder: Arc<Bidder>,
-    pub endpoints: Vec<Arc<Endpoint>>,
-    pub reqs: Mutex<Vec<BidRequest>>,
-    pub response: Mutex<BidderResponseState>,
+    pub callouts: Vec<BidderCallout>,
 }
 
 /// Top level auction context object which carries all context required
@@ -58,7 +70,7 @@ pub struct AuctionContext {
     pub pubid: String,
     pub req: RwLock<BidRequest>,
     pub res: OnceLock<BidResponseState>,
-    pub bidders: Mutex<Vec<BidderContext>>,
+    pub bidders: tokio::sync::Mutex<Vec<BidderContext>>,
 }
 
 impl AuctionContext {
@@ -68,7 +80,7 @@ impl AuctionContext {
             source,
             req: RwLock::new(req),
             res: OnceLock::new(),
-            bidders: Mutex::new(Vec::new()),
+            bidders: tokio::sync::Mutex::new(Vec::new()),
         }
     }
 }

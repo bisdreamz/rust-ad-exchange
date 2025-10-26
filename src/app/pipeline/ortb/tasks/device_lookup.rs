@@ -30,7 +30,8 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
             dev_model = tracing::field::Empty,
             dev_os = tracing::field::Empty,
             dev_type = tracing::field::Empty,
-        ).entered();
+        )
+        .entered();
 
         let req_borrow = context.req.read();
         let dev_borrow = req_borrow.device.as_ref().expect("Should have device!");

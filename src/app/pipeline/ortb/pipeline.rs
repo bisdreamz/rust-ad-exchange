@@ -1,6 +1,7 @@
 use crate::app::context::StartupContext;
-use crate::app::pipeline::ortb::tasks::SchainHopsGlobalFilter;
+use crate::app::pipeline::ortb::tasks::{BidSettlementTask, SchainHopsGlobalFilter};
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
+use crate::core::demand::client::DemandClient;
 use anyhow::{Error, anyhow, bail};
 use pipeline::{Pipeline, PipelineBuilder};
 
@@ -42,15 +43,18 @@ pub fn build_auction_pipeline(
         "RTB pipeline config not set when configuring rtb pipeline"
     ))?;
 
+    let demand_client = DemandClient::new().expect("DemandClient failed todo task for it");
+
     let rtb_pipeline = PipelineBuilder::new()
         .with_blocking(Box::new(tasks::ValidateRequestTask))
         .with_blocking(Box::new(SchainHopsGlobalFilter::new(config.schain_limit)))
         .with_blocking(Box::new(tasks::IpBlockTask::new(ip_risk_filter)))
         .with_blocking(Box::new(tasks::DeviceLookupTask::new(device_lookup)))
-        .with_blocking(Box::new(tasks::BidderMatchingTask::new(
+        .with_async(Box::new(tasks::BidderMatchingTask::new(
             bidder_manager.clone(),
         )))
-        .with_async(Box::new(tasks::BidderCalloutsTask))
+        .with_async(Box::new(tasks::BidderCalloutsTask::new(demand_client)))
+        .with_async(Box::new(BidSettlementTask))
         .build()
         .expect("Auction pipeline should have tasks");
 
