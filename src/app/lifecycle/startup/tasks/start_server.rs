@@ -1,20 +1,19 @@
 use crate::app::lifecycle::context::StartupContext;
 use crate::app::pipeline::ortb::AuctionContext;
+use actix_web::HttpRequest;
 use actix_web::web;
 use actix_web::web::Json;
-use actix_web::HttpRequest;
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use opentelemetry::metrics::{Counter, Histogram};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{KeyValue, global};
 use pipeline::{AsyncTask, Pipeline};
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::json::JsonBidResponseState;
 use rtb::server::{Server, ServerConfig};
-use rtb::{sample_or_attach_root_span, BidRequest};
+use rtb::{BidRequest, sample_or_attach_root_span};
 use std::sync::{Arc, LazyLock};
-use tracing::log::debug;
-use tracing::{info, instrument};
+use tracing::{Instrument, debug, info, instrument};
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex")
@@ -34,8 +33,14 @@ static REQUEST_DURATION: LazyLock<Histogram<f64>> = LazyLock::new(|| {
 
 pub struct StartServerTask;
 
-fn record_request_metric(path: String, source: &str, pubid: String, brs: &BidResponseState, pipeline_ok: bool,
-                         duration: std::time::Duration) {
+fn record_request_metric(
+    path: String,
+    source: &str,
+    pubid: String,
+    brs: &BidResponseState,
+    pipeline_ok: bool,
+    duration: std::time::Duration,
+) {
     let mut attrs = vec![
         KeyValue::new("pubid", pubid),
         KeyValue::new("source", source.to_string()),
@@ -67,20 +72,12 @@ fn record_request_metric(path: String, source: &str, pubid: String, brs: &BidRes
     REQUEST_DURATION.record(duration.as_secs_f64(), &attrs);
 }
 
-async fn handle_bid_request(
+async fn handle_bid_request_instrumented(
     pubid: String,
     source: String,
     req: BidRequest,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
-    span_sample_rate: f32,
 ) -> (BidResponseState, bool) {
-    let root_span = sample_or_attach_root_span!(
-        span_sample_rate,
-        "handle_bid_request",
-        pub_id = pubid,
-        source = source,
-    ).entered();
-
     let mut ctx = AuctionContext::new(source.clone(), pubid, req);
 
     let pipeline_result = pipeline.run(&ctx).await;
@@ -99,6 +96,25 @@ async fn handle_bid_request(
     });
 
     (brs, pipeline_result.is_ok())
+}
+
+async fn handle_bid_request(
+    pubid: String,
+    source: String,
+    req: BidRequest,
+    pipeline: Arc<Pipeline<AuctionContext, Error>>,
+    span_sample_rate: f32,
+) -> (BidResponseState, bool) {
+    let root_span = sample_or_attach_root_span!(
+        span_sample_rate,
+        "handle_bid_request",
+        pub_id = pubid,
+        source = source,
+    );
+
+    handle_bid_request_instrumented(pubid, source, req, pipeline)
+        .instrument(root_span)
+        .await
 }
 
 async fn json_bid_handler(
@@ -156,16 +172,20 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
 
         let server = Server::listen(cfg, move |app| {
             app.route("/hi", web::get().to(|| async { "hi!" })).route(
-                "/br/json/{pubid}",
-                web::post().to({
-                    let pipeline = rtb_pipeline.clone();
-                    move |pubid: web::Path<String>, req: Json<BidRequest>, http_req: HttpRequest| {
-                        let pubid = pubid.into_inner();
-                        let p = pipeline.clone();
-                        async move { json_bid_handler(pubid, req, http_req, p, span_sample_rate).await }
-                    }
-                }),
-            );
+                    "/br/json/{pubid}",
+                    web::post().to({
+                        let pipeline = rtb_pipeline.clone();
+                        move |pubid: web::Path<String>,
+                              req: Json<BidRequest>,
+                              http_req: HttpRequest| {
+                            let pubid = pubid.into_inner();
+                            let p = pipeline.clone();
+                            async move {
+                                json_bid_handler(pubid, req, http_req, p, span_sample_rate).await
+                            }
+                        }
+                    }),
+                );
         })
         .await?;
 
