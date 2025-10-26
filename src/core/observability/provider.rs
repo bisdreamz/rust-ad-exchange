@@ -6,15 +6,14 @@ use std::time::Duration;
 
 use crate::app::config::{FileRotation, LogType, LoggingConfig, OtelProto};
 use actix_web::rt::task::spawn_blocking;
-use anyhow::{anyhow, Context, Result};
-use http::Uri;
-use opentelemetry::{global, trace::TracerProvider, KeyValue};
+use anyhow::{Context, Result, anyhow};
+use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
-use opentelemetry_sdk::Resource;
 use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
 use tonic::transport::ClientTlsConfig;
 use tracing::{error, info};
@@ -23,7 +22,8 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::layer::{Layer, Layered, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, Registry, fmt};
+use url::Url;
 
 type FilteredRegistry = Layered<EnvFilter, Registry>;
 type DynLayer = Box<dyn Layer<FilteredRegistry> + Send + Sync + 'static>;
@@ -389,13 +389,11 @@ fn configure_otel(
 
         // Filter OTEL SDK logs from looping back to OTEL (prevents circular dependencies)
         let appender_layer = OpenTelemetryTracingBridge::new(&logger_provider);
-        let filtered_layer: DynLayer = Box::new(
-            appender_layer.with_filter(
-                tracing_subscriber::filter::filter_fn(|metadata| {
-                    !metadata.target().starts_with("opentelemetry")
-                })
-            )
-        );
+        let filtered_layer: DynLayer = Box::new(appender_layer.with_filter(
+            tracing_subscriber::filter::filter_fn(|metadata| {
+                !metadata.target().starts_with("opentelemetry")
+            }),
+        ));
         logs_layer = Some(filtered_layer);
         logger = Some(logger_provider);
     }
@@ -507,20 +505,20 @@ fn configure_http_builder<T>(
 }
 
 fn tls_config_for(endpoint: &str) -> Result<Option<ClientTlsConfig>> {
-    let uri = match endpoint.parse::<Uri>() {
-        Ok(uri) => uri,
-        Err(_) => match format!("https://{}", endpoint).parse::<Uri>() {
-            Ok(uri) => uri,
+    let url = match Url::parse(endpoint) {
+        Ok(url) => url,
+        Err(_) => match Url::parse(&format!("https://{}", endpoint)) {
+            Ok(url) => url,
             Err(_) => return Ok(None),
         },
     };
 
-    if uri.scheme_str() != Some("https") {
+    if url.scheme() != "https" {
         return Ok(None);
     }
 
     let mut config = ClientTlsConfig::new().with_enabled_roots();
-    if let Some(host) = uri.host() {
+    if let Some(host) = url.host_str() {
         config = config.domain_name(host);
     }
 
