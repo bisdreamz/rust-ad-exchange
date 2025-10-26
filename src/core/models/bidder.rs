@@ -23,8 +23,8 @@ pub enum HttpProto {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum Encoding {
-    Json,
     #[default]
+    Json,
     Protobuf,
 }
 
