@@ -1,12 +1,12 @@
-use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
 use crate::app::pipeline::ortb::AuctionContext;
-use anyhow::{bail, Error};
+use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::bid_response::{Bid, SeatBid, SeatBidBuilder};
 use rtb::common::bidresponsestate::BidResponseState;
-use rtb::{child_span_info, BidResponseBuilder};
-use tracing::{debug, warn, Instrument};
+use rtb::{BidResponseBuilder, child_span_info};
+use tracing::{Instrument, debug, warn};
 
 pub fn sort_bids_by_price(bids: &mut [Bid]) {
     bids.sort_by(|a, b| b.price.total_cmp(&a.price));
@@ -23,7 +23,6 @@ pub fn sort_seats_by_highest_bid(seats: &mut [SeatBid]) {
 pub struct BidSettlementTask;
 
 impl BidSettlementTask {
-
     fn build_bidder_seat_bids(&self, bidder_context: &BidderContext) -> Vec<Bid> {
         let mut seat_bids = Vec::with_capacity(bidder_context.callouts.len());
 

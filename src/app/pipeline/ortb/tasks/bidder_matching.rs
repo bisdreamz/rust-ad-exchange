@@ -1,25 +1,25 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::core::managers::bidders::BidderManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
+use rtb::BidRequest;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use rtb::BidRequest;
 use std::sync::{Arc, OnceLock};
 use tracing::log::debug;
 use tracing::{Instrument, Span};
 
 fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> bool {
     let span = child_span_info!(
-            "bidder_endpoint_matching_task",
-            bidder_name = tracing::field::Empty,
-            endpoint_name = tracing::field::Empty,
-            bidder_endpoint_filter_reason = tracing::field::Empty
-        )
-        .entered();
+        "bidder_endpoint_matching_task",
+        bidder_name = tracing::field::Empty,
+        endpoint_name = tracing::field::Empty,
+        bidder_endpoint_filter_reason = tracing::field::Empty
+    )
+    .entered();
 
     span.record("bidder_name", &bidder.name);
     span.record("endpoint_name", &endpoint.name);
@@ -100,8 +100,7 @@ impl BidderMatchingTask {
         let mut bidder_contexts = Vec::new();
         let span = Span::current();
 
-        let matches =
-            get_filtered_matching(self.manager.bidders().as_ref(), &*context.req.read());
+        let matches = get_filtered_matching(self.manager.bidders().as_ref(), &*context.req.read());
 
         if !span.is_disabled() {
             span.record("bidder_matches_count", matches.len());
@@ -152,11 +151,11 @@ impl BidderMatchingTask {
 impl AsyncTask<AuctionContext, Error> for BidderMatchingTask {
     async fn run(&self, context: &AuctionContext) -> Result<(), Error> {
         let span = child_span_info!(
-                "bidder_matching_task",
-                bidder_matches_count = tracing::field::Empty,
-                endpoints_matches_count = tracing::field::Empty,
-                matches = tracing::field::Empty
-            );
+            "bidder_matching_task",
+            bidder_matches_count = tracing::field::Empty,
+            endpoints_matches_count = tracing::field::Empty,
+            matches = tracing::field::Empty
+        );
 
         self.run0(context).instrument(span).await
     }

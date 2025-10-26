@@ -64,9 +64,9 @@ async fn record_200_nobid(
     start: &Instant,
 ) {
     debug!(
-            "Received no bid (nbr) {} from {}",
-            bid_response.nbr, context.endpoint.name
-        );
+        "Received no bid (nbr) {} from {}",
+        bid_response.nbr, context.endpoint.name
+    );
 
     let nbr = if bid_response.nbr > 0 {
         Some(bid_response.nbr as u32)
@@ -102,9 +102,9 @@ async fn record_unexpected_status(
     }
 
     debug!(
-            "Unexpected status {} received from {}",
-            res.status_code, context.endpoint.name
-        );
+        "Unexpected status {} received from {}",
+        res.status_code, context.endpoint.name
+    );
 }
 
 async fn record_bids(
@@ -144,8 +144,7 @@ async fn record_bid_response_state(
     }
 
     if res.status_code != StatusCode::OK.as_u16() as u32 {
-        return record_unexpected_status(context, context_response, &res, &start)
-            .await;
+        return record_unexpected_status(context, context_response, &res, &start).await;
     }
 
     if res.response.is_none() {
@@ -155,8 +154,7 @@ async fn record_bid_response_state(
     let bid_response = res.response.unwrap();
 
     if bid_response.nbr > 0 || bid_response.seatbid.is_empty() {
-        return record_200_nobid(context, context_response, &bid_response, &start)
-            .await;
+        return record_200_nobid(context, context_response, &bid_response, &start).await;
     }
 
     record_bids(context_response, bid_response, &start).await;
