@@ -1,7 +1,9 @@
 pub mod config_manager;
 pub mod demand;
 pub mod enrichment;
+pub mod events;
 pub mod filters;
 pub mod managers;
 pub mod models;
 pub mod observability;
+pub mod spec;

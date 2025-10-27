@@ -49,7 +49,7 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
         if device_opt.is_none() {
             let brs = BidResponseState::NoBidReason {
                 reqid: req_borrow.id.clone(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::UNSUPPORTED_DEVICE,
                 desc: "Unrecognized user-agent string".into(),
             };
 
@@ -68,8 +68,8 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
         if device.devtype == DeviceType::Bot {
             let brs = BidResponseState::NoBidReason {
                 reqid: req_borrow.id.clone(),
-                nbr: rtb::spec::nobidreason::NONHUMAN_TRAFFIC,
-                desc: "Detected bot".into(),
+                nbr: rtb::spec::openrtb::nobidreason::KNOWN_WEB_CRAWLER,
+                desc: "Detected ua bot".into(),
             };
 
             context
@@ -88,12 +88,12 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
         let dev_mut = req_mut.device.as_mut().unwrap();
 
         let rtb_dev_type = match device.devtype {
-            DeviceType::Desktop => rtb::spec::devicetype::PERSONAL_COMPUTER,
-            DeviceType::Phone => rtb::spec::devicetype::PHONE,
-            DeviceType::SetTop => rtb::spec::devicetype::SET_TOP_BOX,
-            DeviceType::Tablet => rtb::spec::devicetype::TABLET,
-            DeviceType::Tv => rtb::spec::devicetype::CONNECTED_TV,
-            DeviceType::Unknown => rtb::spec::devicetype::MOBILE_TABLET_GENERAL,
+            DeviceType::Desktop => rtb::spec::adcom::devicetype::PERSONAL_COMPUTER,
+            DeviceType::Phone => rtb::spec::adcom::devicetype::PHONE,
+            DeviceType::SetTop => rtb::spec::adcom::devicetype::SET_TOP_BOX,
+            DeviceType::Tablet => rtb::spec::adcom::devicetype::TABLET,
+            DeviceType::Tv => rtb::spec::adcom::devicetype::CONNECTED_TV,
+            DeviceType::Unknown => rtb::spec::adcom::devicetype::MOBILE_TABLET_GENERAL,
             DeviceType::Bot => panic!("Bot hit in switch but shouldnt be possible!"),
         };
 

@@ -2,6 +2,7 @@ use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::core::managers::bidders::BidderManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::spec::nobidreasons;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -116,7 +117,7 @@ impl BidderMatchingTask {
 
             let brs = BidResponseState::NoBidReason {
                 reqid: context.req.read().id.clone(),
-                nbr: rtb::spec::nobidreason::BLOCKED_PUB_OR_SITE,
+                nbr: nobidreasons::NO_BUYERS_PREMATCHED,
                 desc: Some(msg),
             };
 

@@ -1,5 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
+use crate::core::spec::nobidreasons;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -93,7 +94,7 @@ impl BidSettlementTask {
         if seats.is_empty() {
             let final_nobid_state = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
-                nbr: rtb::spec::nobidreason::DAILY_READER_CAP,
+                nbr: nobidreasons::NO_CAMPAIGNS_FOUND,
                 desc: Some("No bids received"),
             };
 
@@ -121,7 +122,7 @@ impl BidSettlementTask {
 
             let brs = BidResponseState::NoBidReason {
                 reqid: context.req.read().id.clone(),
-                nbr: rtb::spec::nobidreason::BLOCKED_PUB_OR_SITE,
+                nbr: rtb::spec::openrtb::nobidreason::TECHNICAL_ERROR,
                 desc: Some("Failed to build final response"),
             };
 

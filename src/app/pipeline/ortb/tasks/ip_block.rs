@@ -33,7 +33,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
 
             let brs = BidResponseState::NoBidReason {
                 reqid: req_borrow.id.clone(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some(msg),
             };
 
@@ -54,7 +54,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
 
             let brs = BidResponseState::NoBidReason {
                 reqid: req_borrow.id.clone(),
-                nbr: rtb::spec::nobidreason::DC_PROXY_IP,
+                nbr: rtb::spec::openrtb::nobidreason::CLOUD_DATACENTER_PROXY_IP,
                 desc: Some(msg),
             };
 

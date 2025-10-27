@@ -27,7 +27,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         if req.id.is_empty() {
             let brs = BidResponseState::NoBidReason {
                 reqid: "missing".into(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing req id".into()),
             };
 
@@ -45,7 +45,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         if device_opt.is_none() {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing device object".into()),
             };
 
@@ -64,7 +64,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         if device.ua.is_empty() {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing device user-agent".into()),
             };
 
@@ -81,7 +81,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         if req.imp.is_empty() {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Empty imps".into()),
             };
 
@@ -98,7 +98,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         if req.distributionchannel_oneof.is_none() {
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),
-                nbr: rtb::spec::nobidreason::INVALID_REQUEST,
+                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing app, site, or dooh object".into()),
             };
 
