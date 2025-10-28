@@ -46,6 +46,8 @@ pub struct Endpoint {
 #[serde(default)]
 pub struct Bidder {
     pub name: String,
+    #[builder(default = "true")]
     pub gzip: bool,
+    #[builder(default = "true")]
     pub multi_imp: bool,
 }

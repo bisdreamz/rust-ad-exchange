@@ -23,4 +23,11 @@ mod bid_settlement;
 pub use bid_settlement::BidSettlementTask;
 
 mod imp_breakout;
+
 pub use imp_breakout::MultiImpBreakoutTask;
+
+mod notifications;
+
+pub use notifications::NotificationsUrlInjectionTask;
+mod test_bidder;
+pub use test_bidder::TestBidderTask;

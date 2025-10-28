@@ -1,5 +1,7 @@
 use crate::app::context::StartupContext;
-use crate::app::pipeline::ortb::tasks::{BidSettlementTask, MultiImpBreakoutTask};
+use crate::app::pipeline::ortb::tasks::{
+    BidSettlementTask, MultiImpBreakoutTask, NotificationsUrlInjectionTask,
+};
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
 use anyhow::{Error, anyhow, bail};
@@ -57,6 +59,8 @@ pub fn build_auction_pipeline(
         )))
         .with_async(Box::new(MultiImpBreakoutTask))
         .with_async(Box::new(tasks::BidderCalloutsTask::new(demand_client)))
+        .with_async(Box::new(tasks::TestBidderTask))
+        .with_async(Box::new(NotificationsUrlInjectionTask))
         .with_async(Box::new(BidSettlementTask))
         .build()
         .expect("Auction pipeline should have tasks");

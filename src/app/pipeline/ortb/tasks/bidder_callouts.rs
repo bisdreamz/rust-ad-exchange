@@ -1,6 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{
-    BidderCallout, BidderContext, BidderResponse, BidderResponseState,
+    BidResponseContext, BidderCallout, BidderContext, BidderResponse, BidderResponseState,
 };
 use crate::core::demand::client::{DemandClient, DemandResponse};
 use anyhow::Error;
@@ -116,7 +116,7 @@ async fn record_bids(
 
     let set = context_response.set(BidderResponse {
         latency: start.elapsed(),
-        state: BidderResponseState::Bid(bid_response),
+        state: BidderResponseState::Bid(BidResponseContext::from(bid_response)),
     });
 
     if let Err(_) = set {
@@ -250,6 +250,11 @@ impl BidderCalloutsTask {
 impl AsyncTask<AuctionContext, Error> for BidderCalloutsTask {
     async fn run(&self, context: &AuctionContext) -> Result<(), Error> {
         let span = child_span_info!("bidder_callouts_task", bidders = tracing::field::Empty);
+
+        if context.req.read().test {
+            warn!("request.test is true, skipping live bidder auctions");
+            return Ok(());
+        }
 
         // TODO simplify span details
         if !span.is_disabled() {

@@ -42,9 +42,9 @@ impl BidSettlementTask {
                 _ => continue,
             };
 
-            for seat in &bid_response.seatbid {
-                for bid in &seat.bid {
-                    seat_bids.push(bid.clone());
+            for seat_context in &bid_response.seatbids {
+                for bid_context in &seat_context.bids {
+                    seat_bids.push(bid_context.bid.clone());
                 }
             }
         }

@@ -2389,6 +2389,7 @@ dependencies = [
  "derive_builder",
  "futures-util",
  "heck",
+ "memchr",
  "pbjson",
  "pbjson-build",
  "pbjson-types",
