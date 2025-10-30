@@ -1,8 +1,8 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
-use crate::core::events::DataUrl;
 use anyhow::{Error, bail};
 use log::debug;
 use pipeline::BlockingTask;
+use rtb::common::DataUrl;
 
 /// Responsible for parsing the raw event url string into
 /// a ['DataUrl'] by which we can extract rich types like price, etc

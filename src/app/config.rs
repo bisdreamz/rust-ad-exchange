@@ -2,6 +2,7 @@ use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::models::publisher::Publisher;
 use config::Config;
 use derive_builder::Builder;
+use rtb::server::TlsConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -36,6 +37,7 @@ pub struct EventConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
+    pub ssl: Option<TlsConfig>,
     #[serde(default)]
     pub caches: CacheConfig,
     pub bidders: Vec<BidderConfig>,

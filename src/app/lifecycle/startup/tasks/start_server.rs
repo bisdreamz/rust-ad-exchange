@@ -151,9 +151,6 @@ async fn billing_event_handler(
 ) -> impl Responder {
     debug!("Billing event handler called");
 
-    debug!("Billing URI: {}", &http_req.uri());
-    debug!("Billing URL: {}", &http_req.full_url());
-
     let context = BillingEventContext::new(http_req.full_url().to_string());
 
     match event_pipeline.run(&context).await {
@@ -172,10 +169,15 @@ async fn billing_event_handler(
 impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
     #[instrument(skip_all, name = "start_server_task")]
     async fn run(&self, ctx: &StartupContext) -> Result<(), Error> {
-        let cfg = ServerConfig {
+        let config = match ctx.config.get() {
+            Some(config) => config,
+            None => bail!("Config missing during start server task"),
+        };
+
+        let server_cfg = ServerConfig {
             http_port: Some(80),
             ssl_port: None,
-            tls: None,
+            tls: config.ssl.clone(),
             tcp_backlog: None,
             max_conns: None,
             threads: None,
@@ -195,11 +197,6 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .logging
             .span_sample_rate;
 
-        let config = match ctx.config.get() {
-            Some(config) => config,
-            None => bail!("Config missing during start server task"),
-        };
-
         let billing_event_path = config.notifications.billing_path.clone();
         if billing_event_path.is_empty() {
             bail!("Billing event path cannot be empty");
@@ -211,7 +208,7 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .ok_or(anyhow::anyhow!("Event pipeline not built"))?
             .clone();
 
-        let server = Server::listen(cfg, move |app| {
+        let server = Server::listen(server_cfg, move |app| {
             app.route("/hi", web::get().to(|| async { "hi!" }))
                 .route(
                     billing_event_path.as_str(),

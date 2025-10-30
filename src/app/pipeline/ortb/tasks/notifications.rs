@@ -1,7 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
 use crate::core::events;
-use crate::core::events::DataUrl;
 use crate::core::events::billing::{BillingEvent, BillingEventBuilder, EventSource};
 use crate::core::models::bidder::{Bidder, Endpoint};
 use anyhow::{Error, bail};
@@ -10,6 +9,7 @@ use log::debug;
 use pipeline::AsyncTask;
 use rtb::bid_response::Bid;
 use rtb::child_span_info;
+use rtb::common::DataUrl;
 use rtb::utils::detect_ad_format;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{Instrument, warn};
@@ -43,8 +43,9 @@ fn build_billing_event(
         .map_err(Error::from)
 }
 
+#[allow(dead_code)]
 fn inject_burl(bid_context: &mut BidContext, base_url: &DataUrl) {
-    let burl = match base_url.clone().add_string("source", "burl") {
+    let _ = match base_url.clone().add_string("source", "burl") {
         Ok(burl) => burl,
         Err(e) => {
             warn!("Failed to build burl, have to skip valid bids!: {}", e);
@@ -74,7 +75,7 @@ fn inject_beacon(bid_context: &mut BidContext, beacon_url: &DataUrl) {
     };
 
     match events::injectors::adm::inject_adm_beacon(beacon_url, &mut bid_context.bid) {
-        Ok(_) => debug!("Successfully injected billing beacon"),
+        Ok(_) => debug!("Successfully injected billing beacon(s)"),
         Err(e) => warn!("Failed to inject billing beacon: {}", e),
     }
 }

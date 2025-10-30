@@ -1,5 +1,5 @@
-use crate::core::events::DataUrl;
 use crate::core::events::billing::BillingEvent;
+use rtb::common::DataUrl;
 use std::sync::OnceLock;
 
 pub struct BillingEventContext {

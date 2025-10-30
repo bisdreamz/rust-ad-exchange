@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Fill majority of macros we can during pre-delivery of a bid for potential win
 /// Includes auction price and mbr, expected all auctions are 1st price
+#[allow(dead_code)]
 pub fn fill_predelivery_macros(
     text: String,
     req: &BidRequest,
@@ -66,6 +67,7 @@ pub fn fill_predelivery_macros(
 
 /// This fills any macros that cannot be completed until we have post impression knowledge
 /// At time of writing, only the ['AUCTION_IMP_TS'] macro exists here
+#[allow(dead_code)]
 pub fn fill_delivery_macros(text: String) -> String {
     let mut text = text;
 
@@ -87,6 +89,7 @@ pub fn fill_delivery_macros(text: String) -> String {
 
 /// This fills any macros that only pertain to loss urls
 /// At time of writing, only the ['AUCTION_LOSS'] and ['AUCTION_MIN_TO_WIN'] macro exists here
+#[allow(dead_code)]
 pub fn fill_loss_macros(text: String, min_price_to_win: f32, loss_code: u32) -> String {
     let mut text = text;
 

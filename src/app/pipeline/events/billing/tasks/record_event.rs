@@ -7,7 +7,7 @@ use rtb::child_span_info;
 use std::ops::Div;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::debug;
 
 static IMP_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex:events:billing")
@@ -66,7 +66,7 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingEventTask {
         let imp_delay_millis = timestamp_millis.saturating_sub(event.bid_timestamp);
         let imp_delay = Duration::from_millis(imp_delay_millis);
 
-        info!(
+        debug!(
             "Recorded billing event pub {} bidder {} gross price {} cost {} format {} delay {}s",
             event.pub_id,
             event.bidder_id,

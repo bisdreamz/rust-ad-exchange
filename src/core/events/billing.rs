@@ -1,6 +1,6 @@
-use crate::core::events::DataUrl;
 use anyhow::Error;
 use derive_builder::Builder;
+use rtb::common::DataUrl;
 use rtb::utils::adformats::AdFormat;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
