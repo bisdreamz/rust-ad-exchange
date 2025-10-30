@@ -1,10 +1,12 @@
 use crate::app::lifecycle::context::StartupContext;
+use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
-use actix_web::HttpRequest;
 use actix_web::web;
 use actix_web::web::Json;
-use anyhow::{Error, anyhow};
+use actix_web::{HttpRequest, HttpResponse, Responder};
+use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
+use log::warn;
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
 use pipeline::{AsyncTask, Pipeline};
@@ -143,6 +145,29 @@ async fn json_bid_handler(
     JsonBidResponseState(brs)
 }
 
+async fn billing_event_handler(
+    http_req: HttpRequest,
+    event_pipeline: Arc<Pipeline<BillingEventContext, Error>>,
+) -> impl Responder {
+    debug!("Billing event handler called");
+
+    debug!("Billing URI: {}", &http_req.uri());
+    debug!("Billing URL: {}", &http_req.full_url());
+
+    let context = BillingEventContext::new(http_req.full_url().to_string());
+
+    match event_pipeline.run(&context).await {
+        Ok(_) => {
+            debug!("Billing event success");
+            HttpResponse::Ok().finish()
+        }
+        Err(e) => {
+            warn!("Failed to record billing event: {}", e);
+            HttpResponse::BadRequest().finish()
+        }
+    }
+}
+
 #[async_trait]
 impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
     #[instrument(skip_all, name = "start_server_task")]
@@ -170,8 +195,36 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .logging
             .span_sample_rate;
 
+        let config = match ctx.config.get() {
+            Some(config) => config,
+            None => bail!("Config missing during start server task"),
+        };
+
+        let billing_event_path = config.notifications.billing_path.clone();
+        if billing_event_path.is_empty() {
+            bail!("Billing event path cannot be empty");
+        }
+
+        let billing_event_pipeline = ctx
+            .event_pipeline
+            .get()
+            .ok_or(anyhow::anyhow!("Event pipeline not built"))?
+            .clone();
+
         let server = Server::listen(cfg, move |app| {
-            app.route("/hi", web::get().to(|| async { "hi!" })).route(
+            app.route("/hi", web::get().to(|| async { "hi!" }))
+                .route(
+                    billing_event_path.as_str(),
+                    web::get().to({
+                        let pipeline = billing_event_pipeline.clone();
+                        move |http_req: HttpRequest| {
+                            let p = pipeline.clone();
+
+                            async move { billing_event_handler(http_req, p).await }
+                        }
+                    }),
+                )
+                .route(
                     "/br/json/{pubid}",
                     web::post().to({
                         let pipeline = rtb_pipeline.clone();

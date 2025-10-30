@@ -1,6 +1,7 @@
 use crate::core::models::shaping::TrafficShaping;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
 pub struct Targeting {
@@ -10,7 +11,7 @@ pub struct Targeting {
     pub native: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, EnumString, Display)]
 pub enum HttpProto {
     /// Force http1.1 only
     Http1,
@@ -21,7 +22,7 @@ pub enum HttpProto {
     Http2,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, EnumString, Display)]
 pub enum Encoding {
     #[default]
     Json,

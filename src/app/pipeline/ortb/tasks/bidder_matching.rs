@@ -1,6 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
-use crate::core::managers::bidders::BidderManager;
+use crate::core::managers::BidderManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::spec::nobidreasons;
 use anyhow::{Error, bail};

@@ -1,7 +1,9 @@
 pub mod bidders_load;
 pub mod config_load;
 pub mod device_load;
+pub mod event_pipeline;
 pub mod ip_risk_load;
 pub mod observability;
+pub mod pubs_load;
 pub mod rtb_pipeline;
 pub mod start_server;

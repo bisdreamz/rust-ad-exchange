@@ -6,4 +6,7 @@ spec_list! {
 
     /// No campaigns found and no bids received
     NO_CAMPAIGNS_FOUND = 501 => "No Campaigns Found",
+    /// The publisher id is unrecognized
+    UNKNOWN_SELLER = 502 => "Unknown Seller",
+    SELLER_DISABLED = 503 => "Disabled Seller",
 }

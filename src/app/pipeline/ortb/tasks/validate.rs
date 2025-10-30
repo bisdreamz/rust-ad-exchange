@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub struct ValidateRequestTask;
 
@@ -17,7 +17,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
         // TODO attach seller span context
 
-        info!(
+        debug!(
             "Validating request for seller {} source {}",
             context.pubid, context.source
         );

@@ -1,10 +1,9 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{
-    BidContext, BidResponseContext, BidderCallout, BidderContext, BidderResponseBuilder,
-    BidderResponseState, SeatBidContext,
+    BidResponseContext, BidderCallout, BidderContext, BidderResponseBuilder, BidderResponseState,
 };
 use crate::core::models::bidder::{BidderBuilder, Endpoint};
-use anyhow::{Error, anyhow, bail};
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::bid_request::{Banner, Imp};
@@ -124,7 +123,7 @@ pub struct TestBidderTask;
 #[async_trait]
 impl AsyncTask<AuctionContext, Error> for TestBidderTask {
     async fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let mut req;
+        let req;
         {
             req = context.req.read().clone();
         }

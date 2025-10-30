@@ -31,7 +31,7 @@ impl BidSettlementTask {
             let response_opt = &callout.response.get();
 
             if response_opt.is_none() {
-                warn!("Had callout without any response state assigned!");
+                // warn!("Had callout without any response state assigned!");
                 continue;
             }
 
@@ -44,7 +44,10 @@ impl BidSettlementTask {
 
             for seat_context in &bid_response.seatbids {
                 for bid_context in &seat_context.bids {
-                    seat_bids.push(bid_context.bid.clone());
+                    match &bid_context.filter_reason {
+                        Some((_, reason)) => debug!("Skipping bid because: {}", reason),
+                        None => seat_bids.push(bid_context.bid.clone()),
+                    }
                 }
             }
         }

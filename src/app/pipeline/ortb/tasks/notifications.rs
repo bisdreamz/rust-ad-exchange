@@ -1,33 +1,46 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{
-    BidContext, BidResponseContext, BidderCallout, BidderContext, BidderResponseState,
-};
+use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
 use crate::core::events;
 use crate::core::events::DataUrl;
+use crate::core::events::billing::{BillingEvent, BillingEventBuilder, EventSource};
 use crate::core::models::bidder::{Bidder, Endpoint};
-use anyhow::Error;
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use log::debug;
 use pipeline::AsyncTask;
-use rtb::{BidResponse, child_span_info};
+use rtb::bid_response::Bid;
+use rtb::child_span_info;
+use rtb::utils::detect_ad_format;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{Instrument, warn};
 
-fn build_base_url(
-    reqid: &String,
-    domain: String,
-    path: String,
+fn build_billing_event(
+    event_id: &String,
     bidder: &Bidder,
     endpoint: &Endpoint,
-) -> Result<DataUrl, Error> {
-    let mut data_url = DataUrl::new(domain.as_str(), path.as_str())?;
+    bid: &Bid,
+    source: EventSource,
+) -> Result<BillingEvent, Error> {
+    let ad_format = match detect_ad_format(bid) {
+        Some(ad_format) => ad_format,
+        None => bail!("Could not detect ad format when building billing event"),
+    };
 
-    data_url.add_string("cb", reqid)?;
-    data_url.add_string("buyer_id", &bidder.name)?;
-    data_url.add_string("buyer_ep", &endpoint.name)?;
-    // data_url.add_string("gp", )
-    // TODO publisher details data_url.add_string("buyer_ep", &callout.endpoint.name)?;
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
 
-    Ok(data_url)
+    BillingEventBuilder::default()
+        .bid_timestamp(timestamp)
+        .auction_event_id(event_id.clone())
+        .bid_event_id(bid.id.to_string()) // TODO this needs to be a real uuid from bid_context
+        .bidder_id(bidder.name.clone())
+        .endpoint_id(endpoint.name.clone())
+        .cpm_cost(bid.price as f32)
+        .cpm_gross(bid.price as f32)
+        .pub_id("123".to_string())
+        .event_source(source.clone())
+        .bid_ad_format(ad_format)
+        .build()
+        .map_err(Error::from)
 }
 
 fn inject_burl(bid_context: &mut BidContext, base_url: &DataUrl) {
@@ -43,26 +56,12 @@ fn inject_burl(bid_context: &mut BidContext, base_url: &DataUrl) {
         }
     };
 
-    let mut bid = &bid_context.bid;
     // shit, need to cache partner burl here
     warn!("Cant inject burl on bid yet! Need a partner burl cache impl");
 }
 
-fn inject_beacon(bid_context: &mut BidContext, base_url: &DataUrl) {
-    let mut beacon_data_url = base_url.clone();
-
-    if let Err(e) = beacon_data_url.add_string("source", "beacon") {
-        warn!("Failed to build burl, have to skip valid bids!: {}", e);
-        bid_context.filter_reason.replace((
-            rtb::spec::openrtb::lossreason::INTERNAL_ERROR,
-            "Cant build beacon url".to_string(),
-        ));
-        return;
-    }
-
-    beacon_data_url.finalize();
-
-    let beacon_url = match beacon_data_url.url(true) {
+fn inject_beacon(bid_context: &mut BidContext, beacon_url: &DataUrl) {
+    let beacon_url = match beacon_url.url(true) {
         Ok(beacon_url) => beacon_url,
         Err(e) => {
             warn!("Failed to build burl, have to skip valid bids!: {}", e);
@@ -80,8 +79,76 @@ fn inject_beacon(bid_context: &mut BidContext, base_url: &DataUrl) {
     }
 }
 
+fn inject_adm_beacon(
+    event_id: &String,
+    bid_context: &mut BidContext,
+    event_domain: &String,
+    billing_path: &String,
+    bidder: &Bidder,
+    endpoint: &Endpoint,
+) {
+    let billing_event_result = build_billing_event(
+        event_id,
+        bidder,
+        endpoint,
+        &bid_context.bid,
+        EventSource::Adm,
+    );
+
+    let billing_event = match billing_event_result {
+        Ok(event) => event,
+        Err(e) => {
+            warn!(
+                "Failed to build billing event, have to skip valid bids!: {}",
+                e
+            );
+            bid_context.filter_reason.replace((
+                rtb::spec::openrtb::lossreason::INTERNAL_ERROR,
+                "Cant build notice url".to_string(),
+            ));
+            return;
+        }
+    };
+
+    let mut beacon_url = match DataUrl::new(event_domain, billing_path) {
+        Ok(beacon_url) => beacon_url,
+        Err(e) => {
+            warn!(
+                "Failed to build billing URL, have to skip valid bids!: {}",
+                e
+            );
+            bid_context.filter_reason.replace((
+                rtb::spec::openrtb::lossreason::INTERNAL_ERROR,
+                "Cant build notice url".to_string(),
+            ));
+            return;
+        }
+    };
+
+    match billing_event.write_to(&mut beacon_url) {
+        Ok(_) => debug!("Successfully injected billing event params into url"),
+        Err(e) => {
+            warn!(
+                "Failed to build billing URL, have to skip valid bids!: {}",
+                e
+            );
+            bid_context.filter_reason.replace((
+                rtb::spec::openrtb::lossreason::INTERNAL_ERROR,
+                "Cant build notice url".to_string(),
+            ));
+            return;
+        }
+    };
+
+    beacon_url.finalize();
+
+    inject_beacon(bid_context, &beacon_url);
+}
+
 fn inject_event_handlers(
-    reqid: &String,
+    event_id: &String,
+    event_domain: &String,
+    billing_path: &String,
     bidder: &Bidder,
     endpoint: &Endpoint,
     bid_response: &mut BidResponseContext,
@@ -92,42 +159,46 @@ fn inject_event_handlers(
                 continue;
             }
 
-            let base_url_result = build_base_url(
-                reqid,
-                "localhost".to_string(),
-                "/bill".to_string(),
+            inject_adm_beacon(
+                event_id,
+                bid_context,
+                event_domain,
+                billing_path,
                 bidder,
                 endpoint,
             );
-
-            if let Err(e) = base_url_result {
-                warn!(
-                    "Failed to build base notification URL, have to skip valid bids!: {}",
-                    e
-                );
-                bid_context.filter_reason.replace((
-                    rtb::spec::openrtb::lossreason::INTERNAL_ERROR,
-                    "Cant build notice url".to_string(),
-                ));
-                continue;
-            }
-
-            let base_url = base_url_result.unwrap();
-
-            inject_beacon(bid_context, &base_url);
         }
     }
 }
 
-/// Responsible for injecting billing notifications into the bid response,
+/// Responsible for injecting billing events into the bid response,
 /// e.g. burl, adm beacon, vast impression.. depending on pub config and ad type
-pub struct NotificationsUrlInjectionTask;
+pub struct NotificationsUrlInjectionTask {
+    /// The public domain (less proto) events should arrive to e.g. events.server.com
+    event_domain: String,
+    /// The path billing events (burl or adm) should arrive at e.g. /billing or /burl
+    billing_path: String,
+}
+
+impl NotificationsUrlInjectionTask {
+    /// Construct a task which is responsible for injecting events into
+    /// the bid response. E.g. burl, lurl, or adm beacons
+    ///
+    /// # Arguments
+    /// * 'event_domain' - The public domain (less proto) events should arrive to e.g. events.server.com
+    /// * 'billing_path' - The path billing events (burl or adm) should arrive at e.g. /billing or /burl
+    pub fn new(event_domain: String, billing_path: String) -> Self {
+        NotificationsUrlInjectionTask {
+            event_domain,
+            billing_path,
+        }
+    }
+}
 
 // TODO per-pub configs here for notification types
 impl NotificationsUrlInjectionTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
         let mut bidders = context.bidders.lock().await;
-        let req = context.req.read();
 
         for bidder_context in bidders.iter_mut() {
             for callout in bidder_context.callouts.iter_mut() {
@@ -150,7 +221,9 @@ impl NotificationsUrlInjectionTask {
                 );
 
                 inject_event_handlers(
-                    &req.id,
+                    &context.event_id,
+                    &self.event_domain,
+                    &self.billing_path,
                     &bidder_context.bidder,
                     &callout.endpoint,
                     bid_response_context,

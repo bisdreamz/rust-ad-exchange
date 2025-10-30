@@ -30,4 +30,7 @@ mod notifications;
 
 pub use notifications::NotificationsUrlInjectionTask;
 mod test_bidder;
+
 pub use test_bidder::TestBidderTask;
+mod pub_lookup;
+pub use pub_lookup::PubLookupTask;

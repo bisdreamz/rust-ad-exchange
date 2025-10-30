@@ -41,13 +41,20 @@ pub fn build_auction_pipeline(
         None => bail!("No Bidder Manager?! Cant build rtb pipeline"),
     };
 
+    let pub_manager = match context.pub_manager.get() {
+        Some(pub_manager) => pub_manager,
+        None => bail!("No publisher manager?! Cant build rtb pipeline"),
+    };
+
     let config = context.config.get().ok_or(anyhow!(
         "RTB pipeline config not set when configuring rtb pipeline"
     ))?;
 
     let demand_client = DemandClient::new().expect("DemandClient failed todo task for it");
+    let events_config = &config.notifications;
 
     let rtb_pipeline = PipelineBuilder::new()
+        .with_blocking(Box::new(tasks::PubLookupTask::new(pub_manager.clone())))
         .with_blocking(Box::new(tasks::ValidateRequestTask))
         .with_blocking(Box::new(tasks::SchainHopsGlobalFilter::new(
             config.schain_limit,
@@ -60,7 +67,10 @@ pub fn build_auction_pipeline(
         .with_async(Box::new(MultiImpBreakoutTask))
         .with_async(Box::new(tasks::BidderCalloutsTask::new(demand_client)))
         .with_async(Box::new(tasks::TestBidderTask))
-        .with_async(Box::new(NotificationsUrlInjectionTask))
+        .with_async(Box::new(NotificationsUrlInjectionTask::new(
+            events_config.domain.clone(),
+            events_config.billing_path.clone(),
+        )))
         .with_async(Box::new(BidSettlementTask))
         .build()
         .expect("Auction pipeline should have tasks");

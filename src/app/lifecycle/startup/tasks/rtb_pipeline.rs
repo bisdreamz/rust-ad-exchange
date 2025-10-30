@@ -9,7 +9,7 @@ use tracing::instrument;
 
 pub struct BuildRtbPipelineTask;
 
-impl BlockingTask<StartupContext, anyhow::Error> for BuildRtbPipelineTask {
+impl BlockingTask<StartupContext, Error> for BuildRtbPipelineTask {
     #[instrument(skip_all, name = "build_rtb_pipeline_task")]
     fn run(&self, context: &StartupContext) -> Result<(), Error> {
         let auction_pipeline = build_auction_pipeline(context)?;

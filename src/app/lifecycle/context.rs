@@ -1,8 +1,9 @@
 use crate::app::config::RexConfig;
+use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::core::enrichment::device::DeviceLookup;
 use crate::core::filters::bot::IpRiskFilter;
-use crate::core::managers::bidders::BidderManager;
+use crate::core::managers::{BidderManager, PublisherManager};
 use crate::core::observability::ObservabilityProviders;
 use anyhow::Error;
 use pipeline::Pipeline;
@@ -25,11 +26,15 @@ pub struct StartupContext {
     // Shared things and data providers
     /// Maintains updated list of bidders and endpoints
     pub bidder_manager: OnceLock<Arc<BidderManager>>,
+    /// Maintains list of publishers
+    pub pub_manager: OnceLock<Arc<PublisherManager>>,
 
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline
     /// The pipeline which defines the core of tasks a bidrequest will flow through for handling
     pub auction_pipeline: OnceLock<Arc<Pipeline<AuctionContext, Error>>>,
+    /// The pipeline which handles billing event events, regardless of source (adm, burl..)
+    pub event_pipeline: OnceLock<Arc<Pipeline<BillingEventContext, Error>>>,
 
     /// The web server
     pub server: OnceLock<Server>,

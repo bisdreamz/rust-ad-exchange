@@ -1,4 +1,5 @@
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::models::publisher::Publisher;
 use config::Config;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
@@ -26,10 +27,20 @@ impl Default for CacheConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+pub struct EventConfig {
+    /// The public domain to be used when building event notificaion urls, e.g. burl
+    pub domain: String,
+    /// The preferred path to use in event urls for billing events, e.g. /billing
+    pub billing_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
     #[serde(default)]
     pub caches: CacheConfig,
     pub bidders: Vec<BidderConfig>,
+    pub publishers: Vec<Publisher>,
+    pub notifications: EventConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
     pub schain_limit: u32,

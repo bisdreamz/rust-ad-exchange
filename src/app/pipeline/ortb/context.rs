@@ -1,4 +1,5 @@
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::models::publisher::Publisher;
 use derive_builder::Builder;
 use parking_lot::RwLock;
 use rtb::bid_response::{Bid, SeatBid};
@@ -7,9 +8,12 @@ use rtb::{BidRequest, BidResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use strum::{AsRefStr, EnumString};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct BidContext {
+    pub bid_event_id: String,
     pub bid: Bid,
     /// original gross demand bid price
     pub original_bid_price: f64,
@@ -23,6 +27,7 @@ pub struct BidContext {
 impl BidContext {
     pub fn from(bid: Bid) -> Self {
         BidContext {
+            bid_event_id: Uuid::new_v4().to_string(),
             original_bid_price: bid.price,
             reduced_bid_price: None,
             filter_reason: None,
@@ -70,7 +75,7 @@ impl BidResponseContext {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, EnumString, AsRefStr)]
 pub enum BidderResponseState {
     /// Bidder failed to respond within time
     #[default]
@@ -128,9 +133,14 @@ pub struct BidderContext {
 /// and bidder specific adapted request objects
 #[derive(Debug, Default)]
 pub struct AuctionContext {
+    /// Raw pubid provided from the http path, pre-validation
+    pub pubid: String,
+    /// The ['Publisher'] object if the pubid value has been recognized
+    pub publisher: OnceLock<Arc<Publisher>>,
+    /// Locally assigned but globally unique identifier for this auction
+    pub event_id: String,
     /// Tag to describe the inbound source of this request, e.g. rtb, rtb_protobuf, prebid, etc
     pub source: String,
-    pub pubid: String,
     pub req: RwLock<BidRequest>,
     pub res: OnceLock<BidResponseState>,
     pub bidders: tokio::sync::Mutex<Vec<BidderContext>>,
@@ -140,6 +150,8 @@ impl AuctionContext {
     pub fn new(source: String, pubid: String, req: BidRequest) -> AuctionContext {
         AuctionContext {
             pubid,
+            publisher: OnceLock::new(),
+            event_id: Uuid::new_v4().to_string(),
             source,
             req: RwLock::new(req),
             res: OnceLock::new(),

@@ -6,13 +6,55 @@ use crate::core::demand::client::{DemandClient, DemandResponse};
 use anyhow::Error;
 use async_trait::async_trait;
 use futures_util::future::join_all;
+use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
 use reqwest::StatusCode;
 use rtb::{BidResponse, child_span_info};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{Instrument, debug, warn};
+
+static COUNTER_BIDDER_CALLOUTS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    global::meter("rex:demand:callouts")
+        .u64_counter("callouts.count")
+        .with_description("Count of separate auctions sent to bidders")
+        .with_unit("1")
+        .build()
+});
+
+static COUNTER_BIDDER_LATENCY: LazyLock<Histogram<f64>> = LazyLock::new(|| {
+    global::meter("rex:demand:callouts")
+        .f64_histogram("callouts.latency")
+        .with_description("Response latency of bidder callouts")
+        .with_unit("s")
+        .build()
+});
+
+static COUNTER_BIDDER_BIDS: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    global::meter("rex:demand:callouts")
+        .u64_counter("callouts.bids.count")
+        .with_description("Total count of individual bids received")
+        .with_unit("1")
+        .build()
+});
+
+static COUNTER_BIDDER_BIDS_PER_AUCTION: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+    global::meter("rex:demand:callouts")
+        .u64_histogram("callouts.bids.per_action")
+        .with_description("Histogram of bids returned per unique auction")
+        .with_unit("1")
+        .build()
+});
+
+static COUNTER_BIDDER_CPM: LazyLock<Histogram<f64>> = LazyLock::new(|| {
+    global::meter("rex:demand:callouts")
+        .f64_histogram("callouts.cpm")
+        .with_description("Response CPM of bids received")
+        .with_unit("{USD}")
+        .build()
+});
 
 async fn get_call_result_or_record_err(
     context: &BidderCallout,
@@ -160,6 +202,68 @@ async fn record_bid_response_state(
     record_bids(context_response, bid_response, &start).await;
 }
 
+fn record_counter_bid_price_metrics(response: &BidderResponse, attrs: &[KeyValue]) {
+    let bid_response = match &response.state {
+        BidderResponseState::Bid(bid_response) => bid_response,
+        _ => return,
+    };
+
+    let mut bid_count = 0;
+    for seat in bid_response.response.seatbid.iter() {
+        for bid in seat.bid.iter() {
+            bid_count += 1;
+
+            COUNTER_BIDDER_BIDS.add(1, attrs);
+            COUNTER_BIDDER_CPM.record(bid.price, attrs);
+        }
+    }
+
+    COUNTER_BIDDER_BIDS_PER_AUCTION.record(bid_count, attrs);
+}
+
+fn record_counter_metrics(context: &AuctionContext, bidders: &Vec<BidderContext>) {
+    let publisher = context.publisher.get().unwrap();
+
+    for bidder_context in bidders {
+        for callout in &bidder_context.callouts {
+            let mut attrs = vec![
+                KeyValue::new("pub_id", publisher.id.clone()),
+                KeyValue::new("pub_name", publisher.name.clone()),
+                KeyValue::new("bidder_id", bidder_context.bidder.name.clone()),
+                KeyValue::new("bidder_endpoint_id", callout.endpoint.name.clone()),
+                KeyValue::new(
+                    "bidder_endpoint_proto",
+                    callout.endpoint.protocol.to_string(),
+                ),
+                KeyValue::new(
+                    "bidder_endpoint_encoding",
+                    callout.endpoint.encoding.to_string(),
+                ),
+            ];
+
+            let outcome = match callout.response.get() {
+                Some(outcome) => {
+                    record_counter_bid_price_metrics(outcome, &attrs);
+
+                    attrs.push(KeyValue::new(
+                        "auction_outcome",
+                        outcome.state.as_ref().to_string(),
+                    ));
+
+                    outcome
+                }
+                None => {
+                    warn!("No response state for auction! Cant record metrics!");
+                    continue;
+                }
+            };
+
+            COUNTER_BIDDER_CALLOUTS.add(1, &attrs);
+            COUNTER_BIDDER_LATENCY.record(outcome.latency.as_secs_f64(), &attrs);
+        }
+    }
+}
+
 pub struct BidderCalloutsTask {
     client: DemandClient,
 }
@@ -233,7 +337,8 @@ impl BidderCalloutsTask {
         let futs = self.send_bidder_callouts(&bidders);
 
         // todo enforce tmax mins and adjustments earlier
-        let tmax = context.req.read().tmax.min(700).max(50);
+        let mut tmax = context.req.read().tmax.min(700).max(50);
+        tmax -= 10;
 
         match timeout(Duration::from_millis(tmax as u64), join_all(futs)).await {
             Ok(_) => debug!("All bidders responded within timax"),
@@ -241,6 +346,8 @@ impl BidderCalloutsTask {
         }
 
         self.record_timeouts(&bidders);
+
+        record_counter_metrics(context, &bidders);
 
         Ok(())
     }

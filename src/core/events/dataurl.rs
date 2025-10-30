@@ -199,6 +199,42 @@ impl DataUrl {
         }
     }
 
+    /// Gets a required string parameter from the URL.
+    ///
+    /// Returns `Ok(value)` if the parameter exists,
+    /// `Err` if the parameter is missing.
+    pub fn get_required_string(&self, key: &str) -> Result<String> {
+        self.get_string(key)?
+            .ok_or_else(|| anyhow!("Missing required parameter: {}", key))
+    }
+
+    /// Gets a required boolean parameter from the URL.
+    ///
+    /// Returns `Ok(value)` if the parameter exists and is a valid boolean,
+    /// `Err` if the parameter is missing or cannot be parsed as a boolean.
+    pub fn get_required_bool(&self, key: &str) -> Result<bool> {
+        self.get_bool(key)?
+            .ok_or_else(|| anyhow!("Missing required parameter: {}", key))
+    }
+
+    /// Gets a required integer parameter from the URL.
+    ///
+    /// Returns `Ok(value)` if the parameter exists and is a valid integer,
+    /// `Err` if the parameter is missing or cannot be parsed as an integer.
+    pub fn get_required_int(&self, key: &str) -> Result<i64> {
+        self.get_int(key)?
+            .ok_or_else(|| anyhow!("Missing required parameter: {}", key))
+    }
+
+    /// Gets a required floating-point parameter from the URL.
+    ///
+    /// Returns `Ok(value)` if the parameter exists and is a valid float,
+    /// `Err` if the parameter is missing or cannot be parsed as a float.
+    pub fn get_required_float(&self, key: &str) -> Result<f64> {
+        self.get_float(key)?
+            .ok_or_else(|| anyhow!("Missing required parameter: {}", key))
+    }
+
     /// Finalizes the URL, preventing any further mutations.
     ///
     /// After calling this method, add_* methods will panic if called.
@@ -409,5 +445,100 @@ mod tests {
         let final_url = url.url(true).unwrap();
         // Space should be encoded (URL encoding can use + or %20)
         assert!(final_url.contains("hello+world") || final_url.contains("hello%20world"));
+    }
+
+    #[test]
+    fn test_get_required_string() {
+        let mut url = DataUrl::new("example.com", "beacon").unwrap();
+        url.add_string("name", "test").unwrap();
+
+        // Should return value when present
+        let result = url.get_required_string("name").unwrap();
+        assert_eq!(result, "test");
+
+        // Should error when missing
+        let result = url.get_required_string("missing");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing required parameter")
+        );
+    }
+
+    #[test]
+    fn test_get_required_bool() {
+        let mut url = DataUrl::new("example.com", "beacon").unwrap();
+        url.add_bool("flag", true).unwrap();
+
+        // Should return value when present
+        let result = url.get_required_bool("flag").unwrap();
+        assert_eq!(result, true);
+
+        // Should error when missing
+        let result = url.get_required_bool("missing");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing required parameter")
+        );
+
+        // Should error when invalid
+        url.add_string("invalid", "not_a_bool").unwrap();
+        let result = url.get_required_bool("invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_required_int() {
+        let mut url = DataUrl::new("example.com", "beacon").unwrap();
+        url.add_int("count", 42).unwrap();
+
+        // Should return value when present
+        let result = url.get_required_int("count").unwrap();
+        assert_eq!(result, 42);
+
+        // Should error when missing
+        let result = url.get_required_int("missing");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing required parameter")
+        );
+
+        // Should error when invalid
+        url.add_string("invalid", "not_an_int").unwrap();
+        let result = url.get_required_int("invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_required_float() {
+        let mut url = DataUrl::new("example.com", "beacon").unwrap();
+        url.add_float("price", 12.99).unwrap();
+
+        // Should return value when present
+        let result = url.get_required_float("price").unwrap();
+        assert_eq!(result, 12.99);
+
+        // Should error when missing
+        let result = url.get_required_float("missing");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing required parameter")
+        );
+
+        // Should error when invalid
+        url.add_string("invalid", "not_a_float").unwrap();
+        let result = url.get_required_float("invalid");
+        assert!(result.is_err());
     }
 }
