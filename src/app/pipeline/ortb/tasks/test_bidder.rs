@@ -100,6 +100,7 @@ fn build_psa_bidder_context(req: BidRequest, bids: Vec<Bid>) -> Result<BidderCon
     callout_response.set(bidder_response).unwrap();
 
     let bidder_callout = BidderCallout {
+        skip_reason: OnceLock::new(),
         endpoint: Arc::new(Endpoint {
             name: "test_endpoint".to_string(),
             ..Default::default()

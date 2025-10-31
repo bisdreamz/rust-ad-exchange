@@ -36,7 +36,7 @@ pub enum EventSource {
     /// The bid.burl field fired s2s from publisher
     Burl,
     /// Placed as an ad markup beacon, either as html 1x1 pixel,
-    /// vast <Impression> entry, or native imptracker
+    /// vast Impression entry, or native imptracker
     Adm,
 }
 

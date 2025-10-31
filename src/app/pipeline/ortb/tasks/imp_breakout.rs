@@ -26,6 +26,7 @@ fn expand_requests(callouts: Vec<BidderCallout>) -> Vec<BidderCallout> {
             expanded_request.imp.push(imp);
 
             expanded_callouts.push(BidderCallout {
+                skip_reason: OnceLock::new(),
                 endpoint: callout.endpoint.clone(),
                 req: expanded_request,
                 response: OnceLock::new(),
@@ -140,6 +141,7 @@ mod tests {
             .unwrap();
 
         let callout = BidderCallout {
+            skip_reason: OnceLock::new(),
             endpoint: endpoint.clone(),
             req,
             response: OnceLock::new(),
@@ -176,6 +178,7 @@ mod tests {
             .unwrap();
 
         let callout = BidderCallout {
+            skip_reason: OnceLock::new(),
             endpoint: endpoint.clone(),
             req,
             response: OnceLock::new(),
@@ -225,11 +228,13 @@ mod tests {
 
         let callouts = vec![
             BidderCallout {
+                skip_reason: OnceLock::new(),
                 endpoint: endpoint.clone(),
                 req: single_imp_req,
                 response: OnceLock::new(),
             },
             BidderCallout {
+                skip_reason: OnceLock::new(),
                 endpoint: endpoint.clone(),
                 req: multi_imp_req,
                 response: OnceLock::new(),
@@ -280,6 +285,7 @@ mod tests {
                 multi_imp: false,
             }),
             callouts: vec![BidderCallout {
+                skip_reason: OnceLock::new(),
                 endpoint: endpoint.clone(),
                 req: callout_req,
                 response: OnceLock::new(),

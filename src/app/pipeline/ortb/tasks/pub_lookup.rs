@@ -59,6 +59,8 @@ impl PubLookupTask {
         Self { manager }
     }
     fn lookup_pub_or_bail(&self, context: &AuctionContext) -> Result<Arc<Publisher>, Error> {
+        let _span = child_span_info!("pub_lookup_task_lookup").entered();
+
         if let Some(publisher) = self.manager.get(&context.pubid) {
             return Ok(publisher);
         }
@@ -80,13 +82,14 @@ impl PubLookupTask {
 
 impl BlockingTask<AuctionContext, Error> for PubLookupTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let _ = child_span_info!("pub_lookup_task", pub_id = tracing::field::Empty).entered();
+        let _span = child_span_info!("pub_lookup_task", pub_id = tracing::field::Empty).entered();
 
         record_and_bail_if_empty(context)?;
 
         let publisher = self.lookup_pub_or_bail(&context)?;
 
         record_and_bail_if_disabled(context, &publisher)?;
+
         context
             .publisher
             .set(publisher.clone())

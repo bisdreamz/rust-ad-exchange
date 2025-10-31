@@ -9,4 +9,5 @@ spec_list! {
     /// The publisher id is unrecognized
     UNKNOWN_SELLER = 502 => "Unknown Seller",
     SELLER_DISABLED = 503 => "Disabled Seller",
+    THROTTLED_BUYER_QPS = 504 => "Throttled All Buyers For QPS",
 }

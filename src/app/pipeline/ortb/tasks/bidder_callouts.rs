@@ -285,6 +285,12 @@ impl BidderCalloutsTask {
             }
 
             for callout in callouts.iter() {
+                if let Some(skip_reason) = callout.skip_reason.get() {
+                    debug!("Skipping callout to {} for skip reason: {}",
+                            &callout.endpoint.name, skip_reason);
+                    continue;
+                }
+
                 let endpoint = &callout.endpoint;
 
                 let res_fut = self.client.send_request(
@@ -335,6 +341,10 @@ impl BidderCalloutsTask {
         debug!("Have {} bidders for callouts", bidders.len());
 
         let futs = self.send_bidder_callouts(&bidders);
+        if futs.is_empty() {
+            debug!("No callouts happened, early exit");
+            return Ok(());
+        }
 
         // todo enforce tmax mins and adjustments earlier
         let mut tmax = context.req.read().tmax.min(700).max(50);

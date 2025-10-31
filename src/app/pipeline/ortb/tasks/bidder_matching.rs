@@ -133,6 +133,7 @@ impl BidderMatchingTask {
 
             for endpoint in endpoints {
                 callouts.push(BidderCallout {
+                    skip_reason: OnceLock::new(),
                     endpoint: endpoint.clone(),
                     req: context.req.read().clone(),
                     response: OnceLock::new(),

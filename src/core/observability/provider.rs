@@ -89,7 +89,6 @@ pub fn init(config: &LoggingConfig) -> Result<Option<ObservabilityProviders>> {
                 let components = configure_otel(
                     endpoint,
                     proto,
-                    config.span_sample_rate,
                     *spans,
                     *logs,
                     *metrics,
@@ -315,7 +314,6 @@ struct OtelComponents {
 fn configure_otel(
     endpoint: &str,
     proto: &OtelProto,
-    sample_rate: f32,
     spans: bool,
     logs: bool,
     metrics: bool,
@@ -351,10 +349,10 @@ fn configure_otel(
             .build()?,
         };
 
-        let sampler =
-            Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(sample_rate as f64)));
+        // Note: Sampling is handled at the application level via sample_or_attach_root_span!
+        // Using AlwaysOn here to avoid double-sampling (which would compound the sample rate)
         let tracer_provider = SdkTracerProvider::builder()
-            .with_sampler(sampler)
+            .with_sampler(Sampler::AlwaysOn)
             .with_resource(resource.clone())
             .with_batch_exporter(exporter)
             .build();

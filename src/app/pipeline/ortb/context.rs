@@ -8,7 +8,7 @@ use rtb::{BidRequest, BidResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use strum::{AsRefStr, EnumString};
+use strum::{AsRefStr, Display, EnumString};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -97,10 +97,23 @@ pub struct BidderResponse {
     pub latency: Duration,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString, AsRefStr, Display)]
+pub enum CalloutSkipReason {
+    TrafficShaping,
+    QpsLimit
+}
+
 #[derive(Debug, Default)]
 pub struct BidderCallout {
+    /// The reason this bid request to the associated endpoint should be skipped, see
+    /// ['CalloutSkipReason']
+    pub skip_reason: OnceLock<CalloutSkipReason>,
+    /// Bidder ['Endpoint'] this callout should be sent to
     pub endpoint: Arc<Endpoint>,
+    /// The owned ['BidRequest'] to be sent during this callout, which can safely
+    /// have any required partner specific adaptations made
     pub req: BidRequest,
+    /// The ['BidderResponse'] if any after auction callout
     pub response: OnceLock<BidderResponse>,
 }
 
