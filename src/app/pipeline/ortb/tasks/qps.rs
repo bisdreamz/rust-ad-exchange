@@ -1,8 +1,8 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
 use crate::core::managers::BidderManager;
 use crate::core::spec::nobidreasons;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use log::info;
@@ -11,12 +11,12 @@ use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use tracing::{debug, trace, warn, Instrument, Span};
+use tracing::{Instrument, Span, debug, trace, warn};
 
 /// Responsible for enforcing QPS limits per emdpoint,
 /// for callouts which do not already have a skip_reason assigned
 pub struct QpslimiterTask {
-    endpoints: HashMap<String, Option<DefaultDirectRateLimiter>>
+    endpoints: HashMap<String, Option<DefaultDirectRateLimiter>>,
 }
 
 impl QpslimiterTask {
@@ -34,14 +34,18 @@ impl QpslimiterTask {
                     None
                 } else {
                     debug!("Endpoint {} QPS limit: {}", endpoint.name, endpoint.qps);
-                    Some(RateLimiter::direct(Quota::per_second(NonZeroU32::new(endpoint.qps as u32).unwrap())))
+                    Some(RateLimiter::direct(Quota::per_second(
+                        NonZeroU32::new(endpoint.qps as u32).unwrap(),
+                    )))
                 };
 
                 endpoints_limiters.insert(endpoint.name.clone(), rl);
             }
         });
 
-        Self { endpoints: endpoints_limiters }
+        Self {
+            endpoints: endpoints_limiters,
+        }
     }
 
     fn should_block(&self, callout: &BidderCallout) -> bool {
@@ -49,13 +53,16 @@ impl QpslimiterTask {
             "qps_limiter_endpoint_should_block",
             endpoint_name = &callout.endpoint.name,
             qps_passed = tracing::field::Empty,
-        ).entered();
+        )
+        .entered();
 
         let rl_opt = match self.endpoints.get(&callout.endpoint.name) {
             Some(rl_opt) => rl_opt,
             None => {
-                warn!("No QPS limiter entry for endpoint {}, panic! Blocking request!",
-                            &callout.endpoint.name);
+                warn!(
+                    "No QPS limiter entry for endpoint {}, panic! Blocking request!",
+                    &callout.endpoint.name
+                );
                 return true;
             }
         };
@@ -63,8 +70,10 @@ impl QpslimiterTask {
         let rl = match rl_opt {
             Some(rl) => rl,
             None => {
-                trace!("No QPS limit for endpoint {}, allowing request through",
-                            &callout.endpoint.name);
+                trace!(
+                    "No QPS limit for endpoint {}, allowing request through",
+                    &callout.endpoint.name
+                );
                 span.record("qps_passed", true);
                 return false;
             }
@@ -74,7 +83,7 @@ impl QpslimiterTask {
             false => {
                 span.record("qps_passed", false);
                 false
-            },
+            }
             true => {
                 span.record("qps_passed", true);
                 true
@@ -98,8 +107,13 @@ impl QpslimiterTask {
                 total_callouts += 1;
 
                 if self.should_block(callout) {
-                    debug!("Endpoint {} throttled by QPS limiter", callout.endpoint.name);
-                    callout.skip_reason.set(CalloutSkipReason::QpsLimit)
+                    debug!(
+                        "Endpoint {} throttled by QPS limiter",
+                        callout.endpoint.name
+                    );
+                    callout
+                        .skip_reason
+                        .set(CalloutSkipReason::QpsLimit)
                         .unwrap_or_else(|_| warn!("Failed assigning skip reason on context!"));
                     continue;
                 }
@@ -121,7 +135,9 @@ impl QpslimiterTask {
                 desc: "Demand QPS Saturated".into(),
             };
 
-            context.res.set(brs)
+            context
+                .res
+                .set(brs)
                 .map_err(|_| anyhow!("Failed assigning no buyer qps reason on context!"))?;
 
             bail!("Endpoints matched prefiltering but failed QPS throttle");

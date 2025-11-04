@@ -1,5 +1,8 @@
 use crate::app::context::StartupContext;
-use crate::app::pipeline::ortb::tasks::{BidSettlementTask, MultiImpBreakoutTask, NotificationsUrlInjectionTask, QpslimiterTask};
+use crate::app::pipeline::ortb::tasks::{
+    BidSettlementTask, MultiImpBreakoutTask, NotificationsUrlInjectionTask, QpslimiterTask,
+    TrafficShapingTask,
+};
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
 use anyhow::{Error, anyhow, bail};
@@ -63,6 +66,7 @@ pub fn build_auction_pipeline(
             bidder_manager.clone(),
         )))
         .with_async(Box::new(MultiImpBreakoutTask))
+        .with_async(Box::new(TrafficShapingTask::new(bidder_manager)))
         .with_async(Box::new(QpslimiterTask::new(bidder_manager)))
         .with_async(Box::new(tasks::BidderCalloutsTask::new(demand_client)))
         .with_async(Box::new(tasks::TestBidderTask))

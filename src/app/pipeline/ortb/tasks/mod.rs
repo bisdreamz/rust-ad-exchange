@@ -36,4 +36,8 @@ mod pub_lookup;
 
 pub use pub_lookup::PubLookupTask;
 mod qps;
+mod traffic_shaping;
+
+pub use traffic_shaping::TrafficShapingTask;
+
 pub use qps::QpslimiterTask;

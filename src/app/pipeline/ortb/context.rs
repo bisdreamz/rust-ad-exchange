@@ -100,7 +100,7 @@ pub struct BidderResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString, AsRefStr, Display)]
 pub enum CalloutSkipReason {
     TrafficShaping,
-    QpsLimit
+    QpsLimit,
 }
 
 #[derive(Debug, Default)]

@@ -9,6 +9,7 @@ otel-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
 rtb-runtime = { path = "../openrtb-rs", features = ["actix-web", "tracing"] }
+logictree = { path = "../logictree" }
 pipeline = {  path = "../pipeline" }
 actix-web = "4.11.0"
 serde = "1.0.228"
@@ -46,3 +47,5 @@ strum = { version = "0.27.2", features = ["derive"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 governor = "0.10.1"
 quick-xml = "0.38.3"
+ordered-float = "5.1.0"
+smallvec = "1.15.1"

@@ -6,4 +6,5 @@ pub mod filters;
 pub mod managers;
 pub mod models;
 pub mod observability;
+pub mod shaping;
 pub mod spec;

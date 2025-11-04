@@ -1,6 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::core::filters::bot::IpRiskFilter;
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;

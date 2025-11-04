@@ -286,8 +286,10 @@ impl BidderCalloutsTask {
 
             for callout in callouts.iter() {
                 if let Some(skip_reason) = callout.skip_reason.get() {
-                    debug!("Skipping callout to {} for skip reason: {}",
-                            &callout.endpoint.name, skip_reason);
+                    debug!(
+                        "Skipping callout to {} for skip reason: {}",
+                        &callout.endpoint.name, skip_reason
+                    );
                     continue;
                 }
 
@@ -298,6 +300,7 @@ impl BidderCalloutsTask {
                     endpoint.clone(),
                     &callout.req,
                 );
+                
                 let handled_fut = record_bid_response_state(callout, res_fut);
 
                 futs.push(handled_fut);

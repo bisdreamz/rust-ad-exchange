@@ -1,6 +1,6 @@
-use anyhow::{anyhow, bail, Error};
-use rtb::bid_response::bid::AdmOneof;
+use anyhow::{Error, anyhow, bail};
 use rtb::bid_response::Bid;
+use rtb::bid_response::bid::AdmOneof;
 use rtb::utils::adformats::AdFormat;
 use rtb::utils::trackers::VastTrackersBuilder;
 
