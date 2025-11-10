@@ -5,9 +5,13 @@ use crate::app::context::StartupContext;
 use crate::app::shutdown::build_shutdown_pipeline;
 use crate::app::startup::build_start_pipeline;
 use actix_web::rt::signal;
+use mimalloc::MiMalloc;
 use rtb::actix_web;
 use std::sync::OnceLock;
 use tracing::info;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[actix_web::main]
 async fn main() {

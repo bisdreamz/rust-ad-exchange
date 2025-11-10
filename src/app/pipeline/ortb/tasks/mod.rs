@@ -26,9 +26,9 @@ mod imp_breakout;
 
 pub use imp_breakout::MultiImpBreakoutTask;
 
-mod notifications;
+mod notice_injections;
 
-pub use notifications::NotificationsUrlInjectionTask;
+pub use notice_injections::NotificationsUrlInjectionTask;
 mod test_bidder;
 
 pub use test_bidder::TestBidderTask;
@@ -41,3 +41,16 @@ mod traffic_shaping;
 pub use traffic_shaping::TrafficShapingTask;
 
 pub use qps::QpslimiterTask;
+pub mod notice_urls;
+pub use notice_urls::NotificationsUrlCreationTask;
+
+mod record_shaping;
+
+pub use record_shaping::RecordShapingTrainingTask;
+
+mod margin_task;
+mod floors_markup;
+
+pub use margin_task::BidMarginTask;
+
+pub use floors_markup::FloorsMarkupTask;

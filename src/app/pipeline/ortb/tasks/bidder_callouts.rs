@@ -300,7 +300,7 @@ impl BidderCalloutsTask {
                     endpoint.clone(),
                     &callout.req,
                 );
-                
+
                 let handled_fut = record_bid_response_state(callout, res_fut);
 
                 futs.push(handled_fut);
@@ -351,7 +351,7 @@ impl BidderCalloutsTask {
 
         // todo enforce tmax mins and adjustments earlier
         let mut tmax = context.req.read().tmax.min(700).max(50);
-        tmax -= 10;
+        tmax -= 20;
 
         match timeout(Duration::from_millis(tmax as u64), join_all(futs)).await {
             Ok(_) => debug!("All bidders responded within timax"),

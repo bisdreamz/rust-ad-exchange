@@ -1,10 +1,13 @@
 use crate::core::models::bidder::Encoding;
 use anyhow::anyhow;
 use bytes::Bytes;
-use flate2::Compression;
-use flate2::write::GzEncoder;
 use rtb::{BidRequest, BidResponse};
-use std::io::Write;
+use std::cell::RefCell;
+
+thread_local! {
+    static COMPRESSOR: RefCell<libdeflater::Compressor> =
+        RefCell::new(libdeflater::Compressor::new(libdeflater::CompressionLvl::fastest()));
+}
 
 pub struct Header {
     pub key: &'static str,
@@ -33,10 +36,18 @@ impl RequestEncoder {
     }
 
     fn compress(data: Vec<u8>) -> Result<Vec<u8>, anyhow::Error> {
-        let mut encoder = GzEncoder::new(Vec::with_capacity(1024), Compression::fast());
-        encoder.write_all(&data)?;
+        COMPRESSOR.with(|c| {
+            let mut compressor = c.borrow_mut();
+            let max_size = compressor.gzip_compress_bound(data.len());
+            let mut compressed = vec![0u8; max_size];
 
-        Ok(encoder.finish()?)
+            let actual_size = compressor
+                .gzip_compress(&data, &mut compressed)
+                .map_err(|e| anyhow!("Compression failed: {:?}", e))?;
+
+            compressed.truncate(actual_size);
+            Ok(compressed)
+        })
     }
 
     /// Encodes the given request to a byte array and associated any required headers

@@ -1,9 +1,10 @@
 use crate::app::config::RexConfig;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::core::demand::notifications::DemandNotificationsCache;
 use crate::core::enrichment::device::DeviceLookup;
 use crate::core::filters::bot::IpRiskFilter;
-use crate::core::managers::{BidderManager, PublisherManager};
+use crate::core::managers::{BidderManager, PublisherManager, ShaperManager};
 use crate::core::observability::ObservabilityProviders;
 use anyhow::Error;
 use pipeline::Pipeline;
@@ -28,6 +29,10 @@ pub struct StartupContext {
     pub bidder_manager: OnceLock<Arc<BidderManager>>,
     /// Maintains list of publishers
     pub pub_manager: OnceLock<Arc<PublisherManager>>,
+    /// Traffic shaping instances per endpoint
+    pub shaping_manager: OnceLock<Arc<ShaperManager>>,
+    /// Caches demand provided notification URLs like burl, lurl
+    pub demand_url_cache: OnceLock<Arc<DemandNotificationsCache>>,
 
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline

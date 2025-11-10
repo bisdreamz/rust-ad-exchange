@@ -4,8 +4,13 @@ use strum::{AsRefStr, Display, EnumString};
 #[derive(Debug, Clone, Deserialize, Serialize, AsRefStr, EnumString, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum Metric {
+    /// Actual (gross) revenue generated per million outbound auctions
     Rpm,
+    /// Bid value per mission auctions - Effective potential value of bid CPMs
+    Bvpm,
+    /// Percentage of billed impressions versus auctions sent
     FillRate,
+    /// Percentage of bids received versus auctions sent
     BidRate,
 }
 
@@ -33,5 +38,9 @@ pub enum TrafficShaping {
         control_percent: u32,
         metric: Metric,
         features: Vec<ShapingFeature>,
+        /// Minimum allowed passing threshold, which for
+        /// endpoints without a qps limit (0) is the fixed threshold
+        #[serde(default)]
+        min_target_metric: f32,
     },
 }

@@ -28,7 +28,7 @@ impl DemandClient {
             .connect_timeout(Duration::from_secs(1))
             .pool_max_idle_per_host(128)
             .pool_idle_timeout(Some(Duration::from_secs(30)))
-            .tcp_keepalive(Some(Duration::from_secs(15)))
+            .tcp_keepalive(Some(Duration::from_secs(20)))
             .retry(retry::never())
             .referer(false)
             .redirect(redirect::Policy::none())
@@ -82,6 +82,10 @@ impl DemandClient {
             HttpProto::Http2 => self.h2_client.get(),
         }
         .expect("Client should never be missing");
+
+        if tracing::event_enabled!(tracing::Level::TRACE) {
+            tracing::trace!("{}", serde_json::to_string(&req)?);
+        }
 
         let request_encoding = RequestEncoder::encode(req, &endpoint.encoding, bidder.gzip)?;
 

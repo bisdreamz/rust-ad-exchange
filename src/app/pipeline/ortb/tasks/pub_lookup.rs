@@ -1,4 +1,4 @@
-use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::{AuctionContext, telemetry};
 use crate::core::managers::PublisherManager;
 use crate::core::models::publisher::Publisher;
 use crate::core::spec::nobidreasons;
@@ -8,8 +8,11 @@ use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use std::sync::Arc;
+use tracing::Span;
 
 fn record_and_bail_if_empty(context: &AuctionContext) -> Result<(), Error> {
+    let parent_span = Span::current();
+
     if context.pubid.trim().is_empty() {
         let brs = BidResponseState::NoBidReason {
             reqid: context.req.read().id.clone(),
@@ -22,6 +25,8 @@ fn record_and_bail_if_empty(context: &AuctionContext) -> Result<(), Error> {
             .set(brs)
             .map_err(|_| anyhow!("Failed to attach empty pubid reason on ctx"))?;
 
+        parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "pubid_arg_missing");
+
         bail!("Unknown pub id");
     }
 
@@ -32,6 +37,8 @@ fn record_and_bail_if_disabled(
     context: &AuctionContext,
     publisher: &Publisher,
 ) -> Result<(), Error> {
+    let parent_span = Span::current();
+
     if !publisher.enabled {
         let brs = BidResponseState::NoBidReason {
             reqid: context.req.read().id.clone(),
@@ -43,6 +50,8 @@ fn record_and_bail_if_disabled(
             .res
             .set(brs)
             .map_err(|_| anyhow!("Failed to attach disabled pub reason on ctx"))?;
+
+        parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "pubid_disabled");
 
         bail!("Disabled publisher {}", publisher.name);
     }
@@ -59,6 +68,7 @@ impl PubLookupTask {
         Self { manager }
     }
     fn lookup_pub_or_bail(&self, context: &AuctionContext) -> Result<Arc<Publisher>, Error> {
+        let parent_span = Span::current();
         let _span = child_span_info!("pub_lookup_task_lookup").entered();
 
         if let Some(publisher) = self.manager.get(&context.pubid) {
@@ -76,15 +86,19 @@ impl PubLookupTask {
             .set(brs)
             .map_err(|_| anyhow!("Failed to attach unrecognized pub reason on ctx"))?;
 
+        parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "pubid_unknown");
+
         bail!("Unknown publisher id {}", &context.pubid);
     }
 }
 
 impl BlockingTask<AuctionContext, Error> for PubLookupTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let _span = child_span_info!("pub_lookup_task", pub_id = tracing::field::Empty).entered();
+        let span = child_span_info!("pub_lookup_task", pub_id = tracing::field::Empty).entered();
 
         record_and_bail_if_empty(context)?;
+
+        span.record("pub_id", &context.pubid);
 
         let publisher = self.lookup_pub_or_bail(&context)?;
 

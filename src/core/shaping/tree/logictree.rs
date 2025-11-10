@@ -4,42 +4,47 @@ use crate::core::shaping::tree::handler::{
     RtbPredictionHandler, RtbPredictionOutput, RtbTrainingInput,
 };
 use crate::core::shaping::{tree, utils};
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail, format_err};
 use arc_swap::ArcSwap;
 use log::info;
 use logictree::{Feature, LogicTree};
-use rtb::bid_response::Bid;
 use rtb::BidRequest;
-use std::sync::atomic::{AtomicU32, Ordering};
+use rtb::bid_response::Bid;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
 use tokio::time::Instant;
 use tracing::{debug, trace, warn};
 
-
-fn task_cycle_threshold(histogram: &QpsHistogram, state_dest: &ArcSwap<ThresholdState>, target_passing_qps: u32) {
-    trace!("Cycling threshold counters");
+fn task_cycle_threshold(
+    histogram: &QpsHistogram,
+    state_dest: &ArcSwap<ThresholdState>,
+    target_passing_qps: u32,
+    min_threshold: f32,
+) {
     let tick = histogram.cycle();
 
-    let state = match tick.threshold(target_passing_qps) {
-        Some(threshold) => {
-            ThresholdState {
-                threshold: threshold.threshold,
-                qps_passing: threshold.avg_qps,
-                qps_avail: tick.effective_qps()
-            }
+    let min_threshold_opt = Some(min_threshold);
+
+    let state = match tick.threshold(target_passing_qps, min_threshold_opt) {
+        Some(threshold) => ThresholdState {
+            threshold: threshold.threshold,
+            qps_passing: threshold.avg_qps,
+            qps_avail: tick.effective_qps(),
         },
         None => {
+            // this happens when no data yet or nothing satisfies the
+            // target criteria (qps or min threshold)
             ThresholdState {
                 threshold: 0.0,
-                qps_passing: 0,
-                qps_avail: tick.effective_qps()
+                qps_passing: tick.effective_qps(),
+                qps_avail: tick.effective_qps(),
             }
         }
     };
 
-    info!("Updating state: {:?}", &state);
+    trace!("Tick duration {}ms requests {} state: {:?}",
+        tick.duration().as_millis(), tick.total_requests(), &state);
 
     state_dest.store(Arc::new(state));
 }
@@ -54,11 +59,20 @@ fn task_tree_prune(tree: &LogicTree<RtbTrainingInput, RtbPredictionOutput, RtbPr
     debug!("Completed tree prune in {} ms", start.elapsed().as_millis());
 }
 
+fn encode_feature_string(features: &Vec<Feature>) -> Result<String, Error> {
+    serde_json::to_string(&features).map_err(|e| anyhow!("Failed to encode feature array: {}", e))
+}
+
+fn decode_feature_string(feature_string: &String) -> Result<Vec<Feature>, Error> {
+    serde_json::from_str::<Vec<Feature>>(feature_string)
+        .map_err(|e| anyhow!("Failed to decode feature array: {}", e))
+}
+
 #[derive(Debug, Default)]
 struct ThresholdState {
     pub threshold: f32,
     pub qps_avail: u32,
-    pub qps_passing: u32
+    pub qps_passing: u32,
 }
 
 #[derive(Debug, AsRefStr, EnumString, Display)]
@@ -66,7 +80,7 @@ pub enum ShapingDecision {
     PassedMetric,
     PassedExploratory,
     PassedBoost,
-    Blocked
+    Blocked,
 }
 
 #[derive(Debug)]
@@ -74,7 +88,8 @@ pub struct ShapingResult {
     pub decision: ShapingDecision,
     pub metric_value: f32,
     pub metric_target: f32,
-    pub pred_depth: u32
+    pub pred_depth: u32,
+    pub features: Vec<Feature>,
 }
 
 /// A Summarizing, online learning traffic shaping implementation
@@ -87,7 +102,8 @@ pub struct TreeShaper {
     metric: Metric,
     /// The ['ShapingFeature'] set in order
     features: Vec<ShapingFeature>,
-    /// The ['QpsHistogram'] which tracks available QPS and shaping value correlations
+    /// The ['QpsHistogram'] which tracks available QPS and shaping value correlations,
+    /// required for dynamic thresholding when a bidder has a QPS limit enforced
     histogram: Arc<QpsHistogram>,
     /// The ['LogicTree'] powering the training and decisioning states for ad segments
     tree: Arc<LogicTree<RtbTrainingInput, RtbPredictionOutput, RtbPredictionHandler>>,
@@ -105,29 +121,47 @@ impl TreeShaper {
         min_decision_auctions: u32,
         segment_ttl: &Duration,
         explore_percent: u32,
-        qps_limit: u32
+        qps_limit: u32,
+        min_threshold: f32,
     ) -> Self {
         let str_features = features.iter().map(|f| f.to_string()).collect();
         let first_pred_handler =
             RtbPredictionHandler::new(min_decision_auctions, segment_ttl.as_secs() as u32);
 
-        // xTODO schedule threshold cycle
-        // xTODO schedule pruning
-        // xTODO logic to calculate "boost" from free QPS budget percentage with floor of exploratory
-        // TODO task? methods? to record auction, bid, impression events
-
-        let histogram = Arc::new(QpsHistogram::new(0.01));
         let tree = Arc::new(LogicTree::new(str_features, first_pred_handler));
         let state = Arc::new(ArcSwap::new(Arc::new(ThresholdState::default())));
 
+        info!(
+            "Starting dynamic thresholding for, have QPS limit of {}",
+            qps_limit
+        );
+
+        let histogram = Arc::new(QpsHistogram::new(0.01));
+
         let histogram_clone = histogram.clone();
         let state_clone = state.clone();
+        let min_threshold_clone = min_threshold.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
+
             loop {
                 interval.tick().await;
-                let passing_qps_budget = tree::utils::qps_budget_passing(explore_percent, qps_limit);
-                task_cycle_threshold(&histogram_clone, &state_clone, passing_qps_budget);
+                let avail_qps = state_clone.load().qps_avail;
+                let passing_qps_budget =
+                    tree::utils::qps_budget_passing(explore_percent, qps_limit, avail_qps);
+
+                if passing_qps_budget == 0 && avail_qps > 0 {
+                    warn!(
+                        "Passing qps budget became zero but have avail QPS! This should not happen unless inactive!"
+                    );
+                }
+
+                task_cycle_threshold(
+                    &histogram_clone,
+                    &state_clone,
+                    passing_qps_budget,
+                    min_threshold_clone,
+                );
             }
         });
 
@@ -141,32 +175,6 @@ impl TreeShaper {
             }
         });
 
-        /*
-            Notes
-            1) Check if passing threshold -> immediate ALLOW if so
-            2) Check and allow exploratory percent, gives failing and immature segments
-                the opportunity for exposure and reperformance
-            3) Block if FAILED prediction *and* failed exploratory check
-            4) Wait, what is our boost criteria now?
-
-            block from boost if has literal 0s in bids OR if full depth and
-            failing threshold
-
-            if no boost quota available and its gotten here.. block it!
-
-            can I use auctions < MIN_AUCTIONS * multiplier?
-            but then whats purpose of the min auctions, it might be
-            a full depth prediction..
-        */
-
-        /*
-        need utility to manage QPS share of a percentage or absolute amount of QPS
-        percent -> exploratory -> 5% = QPS Budget * 0.05 = what percentage of available?
-        absolute -> boost -> QPS budget - exploratory (qps budget * 0.05) - passing = what percentage of available?
-
-        need to be able to update it every cycle with the new available + passing count
-         */
-
         TreeShaper {
             metric: metric.clone(),
             histogram,
@@ -174,7 +182,7 @@ impl TreeShaper {
             features: features.clone(),
             state,
             qps_explore_percent: explore_percent,
-            qps_limit
+            qps_limit,
         }
     }
 
@@ -195,29 +203,45 @@ impl TreeShaper {
         };
 
         let state = self.state.load();
+        // We will continuously offset this avail pool by the amounts
+        // consumed at certain code paths to ensure later QPS shares
+        // are properly adjusted, e.g. we dont calculate a boost
+        // passing with the *total* qps, when in fact it only sees
+        // evaluations for (avail - passing - exploratory)
+        let mut avail_qps_pool = state.qps_avail;
 
         let prediction = match prediction_opt {
             Some(prediction) => prediction,
             None => {
-                // this is only expected for extremely brannd new shaping instances
+                // this is only expected for extremely brand new shaping instances
+                // that dont have data even at the root level
                 debug!("No prediction data at all yet for: {:?}", req_features);
 
-                self.record_auction(req)?;
+                self.histogram
+                    .record_request(0.0)
+                    .map_err(|e| format_err!("Histogram err recording QPS value: {:?}", e))?;
 
                 return Ok(ShapingResult {
                     decision: ShapingDecision::PassedExploratory,
                     metric_value: 0.0,
                     metric_target: state.threshold,
                     pred_depth: 0,
+                    features: req_features,
                 });
             }
         };
 
         let metric_value = match self.metric {
             Metric::BidRate => prediction.value.bid_rate_percent(),
+            Metric::Bvpm => prediction.value.bid_value_per_mille(),
             Metric::FillRate => prediction.value.fill_rate_percent(),
             Metric::Rpm => prediction.value.rev_per_mille(),
         };
+
+        // records the *available* request and its value in the histogram so it sees all
+        self.histogram
+            .record_request(metric_value)
+            .map_err(|e| format_err!("Histogram err recording QPS value: {:?}", e))?;
 
         let passed = metric_value >= state.threshold;
 
@@ -232,21 +256,61 @@ impl TreeShaper {
                 metric_value,
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
-            })
+                features: req_features,
+            });
         }
 
-        if tree::utils::qps_exploratory_passes(self.qps_explore_percent, self.qps_limit, state.qps_avail) {
+        avail_qps_pool = avail_qps_pool.saturating_sub(state.qps_passing);
+        if avail_qps_pool == 0 && state.threshold > 0.0 {
+            // how is this possible? this says that all qps passing = qps avail
+            // but it didnt pass the check above?
+
+            warn!(
+                "Passing QPS ({}) is >= available ({}) but failed metric?!",
+                state.qps_passing, state.qps_avail
+            );
+        }
+
+        let qps_exploratory = tree::utils::qps_budget_exploratory(
+            self.qps_explore_percent,
+            self.qps_limit,
+            state.qps_avail, // exploratory is percent of endpoint qps limit OR all avail
+        );
+        if tree::utils::qps_passes_percentage(qps_exploratory, avail_qps_pool) {
             debug!("Request failed shaping but passed exploratory");
+
+            self.record_auction(req)?;
 
             return Ok(ShapingResult {
                 decision: ShapingDecision::PassedExploratory,
                 metric_value,
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
-            })
+                features: req_features,
+            });
         }
 
-        if prediction.full_depth || metric_value == 0.0 {
+        avail_qps_pool = avail_qps_pool.saturating_sub(qps_exploratory);
+        if avail_qps_pool == 0 {
+            debug!(
+                "Request failed shaping. Full QPS allocation used by passing and exploratory, blocking boost"
+            );
+
+            return Ok(ShapingResult {
+                decision: ShapingDecision::Blocked,
+                metric_value,
+                metric_target: state.threshold,
+                pred_depth: prediction.depth as u32,
+                features: req_features,
+            });
+        }
+
+        // need min auctions check to filter on 0.0
+        // or do we? keeping 0.0 means accelerate premature but
+        // promising segments
+        if prediction.full_depth
+        /*|| metric_value == 0.0 */
+        {
             debug!("Skipping boost check for request - full depth failure or 0 KPI activity");
 
             return Ok(ShapingResult {
@@ -254,10 +318,17 @@ impl TreeShaper {
                 metric_value,
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
-            })
+                features: req_features,
+            });
         }
 
-        if tree::utils::qps_boost_passes(state.qps_passing, self.qps_limit, state.qps_avail) {
+        let qps_boost = tree::utils::qps_budget_boost(
+            state.qps_passing,
+            qps_exploratory,
+            self.qps_limit,
+            avail_qps_pool,
+        );
+        if tree::utils::qps_passes_percentage(qps_boost, avail_qps_pool) {
             debug!("Request passing through boost");
 
             return Ok(ShapingResult {
@@ -265,30 +336,84 @@ impl TreeShaper {
                 metric_value,
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
-            })
+                features: req_features,
+            });
         }
 
-        debug!("Request failed shaping, exploratory, and boost - blocking!");
+        avail_qps_pool = avail_qps_pool.saturating_sub(qps_boost);
+
+        debug!(
+            "Request failed shaping, exploratory, and boost - blocking! Had {} unallocated QPS",
+            avail_qps_pool
+        );
 
         Ok(ShapingResult {
             decision: ShapingDecision::Blocked,
             metric_value,
             metric_target: state.threshold,
             pred_depth: prediction.depth as u32,
+            features: req_features,
         })
     }
 
     pub fn record_auction(&self, req: &BidRequest) -> Result<(), Error> {
         let features = self.extract_features(req, &None);
 
-        self.histogram.record_request(1.0).expect("TODO: panic message");
+        self.tree
+            .train(
+                &features,
+                &RtbTrainingInput {
+                    auctions: 1,
+                    bids: 0,
+                    impressions: 0,
+                    bid_value: 0.0,
+                    rev_gross: 0.0,
+                    rev_cost: 0.0,
+                },
+            )
+            .map_err(|e| anyhow!("Failed recording tree auction: {}", e))
+    }
 
-        self.tree.train(&features, &RtbTrainingInput {
-            auctions: 1,
-            bids: 0,
-            impressions: 0,
-            rev_gross: 0.0,
-            rev_cost: 0.0,
-        }).map_err(|e| anyhow!(e))
+    pub fn record_bid(&self, req: &BidRequest, bid: &Bid) -> Result<String, Error> {
+        let features = self.extract_features(req, &Some(bid));
+
+        self.tree
+            .train(
+                &features,
+                &RtbTrainingInput {
+                    auctions: 0,
+                    bids: 1,
+                    bid_value: bid.price as f32,
+                    impressions: 0,
+                    rev_gross: 0.0,
+                    rev_cost: 0.0,
+                },
+            )
+            .map_err(|e| anyhow!("Failed recording tree bid: {}", e))?;
+
+        Ok(encode_feature_string(&features)?)
+    }
+
+    pub fn record_impression(
+        &self,
+        bid_feature_key: &String,
+        cpm_gross: f64,
+        cpm_cost: f64,
+    ) -> Result<(), Error> {
+        let features = decode_feature_string(&bid_feature_key)?;
+
+        self.tree
+            .train(
+                &features,
+                &RtbTrainingInput {
+                    auctions: 0,
+                    bids: 0,
+                    bid_value: 0.0,
+                    impressions: 1,
+                    rev_gross: cpm_gross as f32,
+                    rev_cost: cpm_cost as f32,
+                },
+            )
+            .map_err(|e| anyhow!("Failed recording tree impression: {}", e))
     }
 }

@@ -2,7 +2,6 @@ use crate::app::lifecycle::context::StartupContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
 use actix_web::web;
-use actix_web::web::Json;
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
@@ -11,7 +10,7 @@ use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
 use pipeline::{AsyncTask, Pipeline};
 use rtb::common::bidresponsestate::BidResponseState;
-use rtb::server::json::JsonBidResponseState;
+use rtb::server::json::{FastJson, JsonBidResponseState};
 use rtb::server::{Server, ServerConfig};
 use rtb::{BidRequest, sample_or_attach_root_span};
 use std::sync::{Arc, LazyLock};
@@ -121,9 +120,9 @@ async fn handle_bid_request(
 
 async fn json_bid_handler(
     pubid: String,
-    req: Json<BidRequest>,
+    req: FastJson<BidRequest>,
     http_req: HttpRequest,
-    pipeline: Arc<Pipeline<AuctionContext, anyhow::Error>>,
+    pipeline: Arc<Pipeline<AuctionContext, Error>>,
     span_sample_rate: f32,
 ) -> JsonBidResponseState {
     let source = http_req.match_pattern().unwrap_or("unknown".to_string());
@@ -226,7 +225,7 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                     web::post().to({
                         let pipeline = rtb_pipeline.clone();
                         move |pubid: web::Path<String>,
-                              req: Json<BidRequest>,
+                              req: FastJson<BidRequest>,
                               http_req: HttpRequest| {
                             let pubid = pubid.into_inner();
                             let p = pipeline.clone();

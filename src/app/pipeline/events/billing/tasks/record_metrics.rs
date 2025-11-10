@@ -8,6 +8,7 @@ use std::ops::Div;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::debug;
+use crate::core::events::billing::EventSource;
 
 static IMP_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex:events:billing")
@@ -41,19 +42,27 @@ static IMP_DURATION: LazyLock<Histogram<f64>> = LazyLock::new(|| {
         .build()
 });
 
-pub struct RecordBillingEventTask;
+/// Records raw billing event call metrics for OTEL export
+/// This is intended to record *all* events, even if the notice_urls
+/// was expired! This is to ensure we have full visibility on
+/// incoming event calls. This task should be placed before a
+/// bail on missing URLs task, and the demand burl fire should
+/// be after that
+pub struct RecordBillingMetricsTask;
 
-impl BlockingTask<BillingEventContext, Error> for RecordBillingEventTask {
+impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
     fn run(&self, context: &BillingEventContext) -> Result<(), Error> {
         let span = child_span_info!(
             "record_billing_event",
             pub_id = tracing::field::Empty,
             bidder_id = tracing::field::Empty,
+            bidder_endpoint_id = tracing::field::Empty,
             ad_format = tracing::field::Empty,
             cpm_gross = tracing::field::Empty,
             cpm_cost = tracing::field::Empty,
             source = tracing::field::Empty,
             imp_delay_secs = tracing::field::Empty,
+            expired = tracing::field::Empty,
         );
 
         let event = context
@@ -76,19 +85,24 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingEventTask {
             imp_delay.as_secs()
         );
 
+        let source = event.event_source.as_ref().unwrap_or(&EventSource::Unknown).to_string();
+
         span.record("pub_id", event.pub_id.clone());
         span.record("bidder_id", event.bidder_id.clone());
+        span.record("bidder_endpoint_id", event.endpoint_id.clone());
         span.record("ad_format", event.bid_ad_format.to_string());
         span.record("cpm_gross", event.cpm_gross);
         span.record("cpm_cost", event.cpm_cost);
-        span.record("source", event.event_source.to_string());
         span.record("imp_delay_secs", imp_delay.as_secs());
+        span.record("expired", context.demand_urls.get().is_none());
+        span.record("source", source.clone());
 
         let attrs = vec![
             KeyValue::new("pub_id", event.pub_id.clone()),
             KeyValue::new("bidder_id", event.bidder_id.clone()),
-            KeyValue::new("source", event.event_source.to_string()),
+            KeyValue::new("bidder_endpoint_id", event.endpoint_id.clone()),
             KeyValue::new("ad_format", event.bid_ad_format.to_string()),
+            KeyValue::new("source", source.clone()),
         ];
 
         IMP_TOTAL.add(1, &attrs);

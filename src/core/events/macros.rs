@@ -1,5 +1,4 @@
 use log::warn;
-use rtb::bid_request::Imp;
 use rtb::bid_response::{Bid, SeatBid};
 use rtb::{BidRequest, BidResponse};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,11 +12,11 @@ pub fn fill_predelivery_macros(
     res: &BidResponse,
     seat: &SeatBid,
     bid: &Bid,
-    imp: &Imp,
 ) -> String {
     let mut text = text;
 
-    let multiplier = match &imp.qty {
+    // expect pub to complete if applicable for now
+    /*let multiplier = match &imp.qty {
         Some(qty) => {
             if qty.multiplier == 0.0 {
                 ""
@@ -26,7 +25,7 @@ pub fn fill_predelivery_macros(
             }
         }
         None => "",
-    };
+    };*/
 
     text = text.replace(
         rtb::openrtb::spec::auction_macros::AUCTION_ID,
@@ -48,11 +47,7 @@ pub fn fill_predelivery_macros(
         rtb::openrtb::spec::auction_macros::AUCTION_IMP_ID,
         bid.impid.as_str(),
     );
-    text = text.replace(
-        rtb::openrtb::spec::auction_macros::AUCTION_MULTIPLIER,
-        multiplier,
-    );
-    text = text.replace(rtb::openrtb::spec::auction_macros::AUCTION_MBR, "1".into()); // 1st price
+    text = text.replace(rtb::openrtb::spec::auction_macros::AUCTION_MBR, "1".into());
     text = text.replace(
         rtb::openrtb::spec::auction_macros::AUCTION_PRICE,
         bid.price.to_string().as_str(),

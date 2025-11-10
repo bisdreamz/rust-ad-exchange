@@ -1,7 +1,7 @@
 use anyhow::Error;
 use derive_builder::Builder;
 use rtb::common::DataUrl;
-use rtb::utils::adformats::AdFormat;
+use rtb::utils::adm::AdFormat;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum::{Display, EnumString};
@@ -26,7 +26,6 @@ pub const FIELD_PUB_ID: &str = "pi";
 pub const FIELD_BID_AD_FORMAT: &str = "f";
 /// The location and invocation source of this event,
 /// see ['EventSource']
-///
 pub const FIELD_EVENT_SOURCE: &str = "s";
 
 /// Source of billing event
@@ -38,6 +37,8 @@ pub enum EventSource {
     /// Placed as an ad markup beacon, either as html 1x1 pixel,
     /// vast Impression entry, or native imptracker
     Adm,
+    /// if unassigned or not provided
+    Unknown
 }
 
 /// Primary fields used to produce or extract details from a billing event url
@@ -46,13 +47,13 @@ pub struct BillingEvent {
     pub bid_timestamp: u64,
     pub auction_event_id: String,
     pub bid_event_id: String,
-    pub cpm_gross: f32,
-    pub cpm_cost: f32,
+    pub cpm_gross: f64,
+    pub cpm_cost: f64,
     pub bidder_id: String,
     pub endpoint_id: String,
     pub pub_id: String,
     pub bid_ad_format: AdFormat,
-    pub event_source: EventSource,
+    pub event_source: Option<EventSource>
 }
 
 impl BillingEvent {
@@ -68,13 +69,13 @@ impl BillingEvent {
             .bid_timestamp(data_url.get_required_int(FIELD_BID_TIMESTAMP)? as u64)
             .auction_event_id(data_url.get_required_string(FIELD_AUCTION_EVENT_ID)?)
             .bid_event_id(data_url.get_required_string(FIELD_BID_EVENT_ID)?)
-            .cpm_gross(data_url.get_required_float(FIELD_CPM_GROSS)? as f32)
-            .cpm_cost(data_url.get_required_float(FIELD_CPM_COST)? as f32)
+            .cpm_gross(data_url.get_required_float(FIELD_CPM_GROSS)?)
+            .cpm_cost(data_url.get_required_float(FIELD_CPM_COST)?)
             .bidder_id(data_url.get_required_string(FIELD_BIDDER_ID)?)
             .endpoint_id(data_url.get_required_string(FIELD_ENDPOINT_ID)?)
             .pub_id(data_url.get_required_string(FIELD_PUB_ID)?)
             .bid_ad_format(bid_ad_format)
-            .event_source(event_source)
+            .event_source(Some(event_source))
             .build()?)
     }
 
@@ -89,8 +90,12 @@ impl BillingEvent {
             .add_string(FIELD_BIDDER_ID, &self.bidder_id)?
             .add_string(FIELD_ENDPOINT_ID, &self.endpoint_id)?
             .add_string(FIELD_PUB_ID, &self.pub_id)?
-            .add_string(FIELD_BID_AD_FORMAT, &self.bid_ad_format.to_string())?
-            .add_string(FIELD_EVENT_SOURCE, &self.event_source.to_string())?;
+            .add_string(FIELD_BID_AD_FORMAT, &self.bid_ad_format.to_string())?;
+
+        if self.event_source.is_some() {
+            data_url.add_string(FIELD_EVENT_SOURCE, &self.event_source.as_ref().unwrap().to_string())?;
+        }
+
         Ok(())
     }
 }

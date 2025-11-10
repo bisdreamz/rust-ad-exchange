@@ -1,7 +1,7 @@
 mod handler;
 mod logictree;
-mod utils;
 mod serializers;
+mod utils;
 
-pub use logictree::TreeShaper;
 pub use logictree::ShapingDecision;
+pub use logictree::TreeShaper;

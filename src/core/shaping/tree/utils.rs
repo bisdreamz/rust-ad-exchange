@@ -1,62 +1,83 @@
-use tracing::{debug, warn};
-
-/// Calculate the QPS value of exploratory from the percentage
-/// setting and QPS budget limit
-pub fn qps_budget_exploratory(explore_budget_percent: u32, budget_limit_qps: u32) -> u32 {
+/// Calculate the QPS value of exploratory from a percentage.
+/// This returns the effective QPS derived from exploratory percent
+/// of the budget_limit_qps if > 0, otherwise as a percentage of avail
+pub fn qps_budget_exploratory(
+    explore_budget_percent: u32,
+    budget_limit_qps: u32,
+    avail_qps_pool: u32,
+) -> u32 {
     // Convert 5 -> 0.05
-    let explore_ratio = explore_budget_percent as f32 / 100.0;
+    let explore_ratio = explore_budget_percent.max(1) as f32 / 100.0;
 
-    (budget_limit_qps as f32 * explore_ratio) as u32
+    let exploratory_qps = if budget_limit_qps == 0 {
+        // no qps limit, calculate as percent of avail
+        (avail_qps_pool as f32 * explore_ratio) as u32
+    } else {
+        // we have a qps limit
+        (budget_limit_qps as f32 * explore_ratio) as u32
+    };
+
+    exploratory_qps
 }
 
 /// Calculate the free QPS share eligible for boost defined as
 /// qps budget - passing qps - exploratory qps
-pub fn qps_budget_boost(passing_qps: u32, budget_qps: u32, avail_qps: u32) -> u32 {
-    budget_qps - passing_qps - qps_budget_exploratory(passing_qps, avail_qps)
+pub fn qps_budget_boost(
+    passing_qps: u32,
+    exploratory_qps: u32,
+    budget_limit_qps: u32,
+    avail_qps_pool: u32,
+) -> u32 {
+    if budget_limit_qps == 0 {
+        return avail_qps_pool
+            .saturating_sub(passing_qps)
+            .saturating_sub(exploratory_qps);
+    }
+
+    budget_limit_qps
+        .saturating_sub(passing_qps)
+        .saturating_sub(exploratory_qps)
 }
 
 /// Calculate the max budget of passing QPS defined as
 /// qps limit - exploratory qps
-pub fn qps_budget_passing(explore_qps_percent: u32, budet_limit_qps: u32) -> u32 {
-    let explore_qps = qps_budget_exploratory(explore_qps_percent, budet_limit_qps);
+pub fn qps_budget_passing(
+    explore_qps_percent: u32,
+    budget_limit_qps: u32,
+    avail_qps_pool: u32,
+) -> u32 {
+    let explore_qps = qps_budget_exploratory(explore_qps_percent, budget_limit_qps, avail_qps_pool);
 
-    budet_limit_qps - explore_qps
+    if avail_qps_pool == 0 {
+        return 0;
+    }
+
+    if budget_limit_qps > 0 {
+        budget_limit_qps.saturating_sub(explore_qps)
+    } else {
+        avail_qps_pool.saturating_sub(explore_qps)
+    }
 }
 
-/// Evaluate if this request passes exploratory QPS share,
-/// See ['qps_exploratory()']
+/// Generic method to assess random probability of whether this request
+/// passes or not, given the relation of target_qps to avail_qps_pool
+/// E.g. 200 target / 1000 avail = 20% chance of passing
 ///
-/// does this need to consider or offset for passing qps or anything else
-/// depending on how often we call it? how do we ensure its the
-/// proper percentage through and not over or under
-pub fn qps_exploratory_passes(
-    explore_budget_percent: u32,
-    budget_limit_qps: u32,
-    avail_qps: u32,
-) -> bool {
-    if avail_qps == 0 {
-        warn!("avail_qps cannot be 0 when calculating exploratory QPS!");
+/// # Arguments
+/// * 'target_qps' - The desired QPS
+/// * 'avail_qps_pool' - The available QPS to pass a share of. It is
+/// important that this is a true reflection of available QPS at
+/// the point in which this function is called!
+pub fn qps_passes_percentage(target_qps: u32, avail_qps_pool: u32) -> bool {
+    if avail_qps_pool == 0 {
         return false;
     }
 
-    let explore_qps_budget = qps_budget_exploratory(explore_budget_percent, budget_limit_qps) as f32;
+    if target_qps >= avail_qps_pool {
+        return true;
+    }
 
-    // What percentage of available QPS can we use for exploration?
-    let pass_probability = (explore_qps_budget / avail_qps as f32).min(1.0);
+    let probability = target_qps as f32 / avail_qps_pool as f32;
 
-    debug!(
-        "qps_exploratory_passes available {} limit {} percent {} rand threshold {}",
-        avail_qps, budget_limit_qps, explore_budget_percent, pass_probability
-    );
-
-    rand::random_bool(pass_probability as f64)
-}
-
-/// Evaluate if a request passes the boost qps share
-/// See ['qps_boost()']
-pub fn qps_boost_passes(passing_qps: u32, budget_qps: u32, avail_qps: u32) -> bool {
-    let boost_qps = budget_qps - passing_qps - qps_budget_exploratory(passing_qps, avail_qps);
-    let boost_probability = boost_qps as f32 / avail_qps as f32;
-
-    rand::random_bool(boost_probability as f64)
+    rand::random_bool(probability as f64)
 }

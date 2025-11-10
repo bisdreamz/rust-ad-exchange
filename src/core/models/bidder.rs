@@ -12,6 +12,7 @@ pub struct Targeting {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, EnumString, Display)]
+#[serde(rename_all = "lowercase")]
 pub enum HttpProto {
     /// Force http1.1 only
     Http1,
@@ -23,6 +24,7 @@ pub enum HttpProto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, EnumString, Display)]
+#[serde(rename_all = "lowercase")]
 pub enum Encoding {
     #[default]
     Json,

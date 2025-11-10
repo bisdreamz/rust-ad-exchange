@@ -5,7 +5,6 @@ use crate::core::spec::nobidreasons;
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
-use log::info;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
@@ -81,10 +80,12 @@ impl QpslimiterTask {
 
         match rl.check().is_err() {
             false => {
+                debug!("Endpoint passed QPS limiter");
                 span.record("qps_passed", false);
                 false
             }
             true => {
+                debug!("Endpoint failed QPS limiter");
                 span.record("qps_passed", true);
                 true
             }
@@ -120,7 +121,7 @@ impl QpslimiterTask {
 
                 callouts_passed += 1;
 
-                info!("Endpoint {} passed QPS limiter", &callout.endpoint.name);
+                debug!("Endpoint {} passed QPS limiter", &callout.endpoint.name);
             }
         }
 
@@ -140,7 +141,7 @@ impl QpslimiterTask {
                 .set(brs)
                 .map_err(|_| anyhow!("Failed assigning no buyer qps reason on context!"))?;
 
-            bail!("Endpoints matched prefiltering but failed QPS throttle");
+            bail!("No endpoints survived prior filtering or QPS filtering, bailing");
         }
 
         Ok(())

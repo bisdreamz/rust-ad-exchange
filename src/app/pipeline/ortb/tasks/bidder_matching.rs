@@ -9,7 +9,7 @@ use pipeline::AsyncTask;
 use rtb::BidRequest;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use tracing::log::debug;
 use tracing::{Instrument, Span};
 
@@ -133,10 +133,9 @@ impl BidderMatchingTask {
 
             for endpoint in endpoints {
                 callouts.push(BidderCallout {
-                    skip_reason: OnceLock::new(),
                     endpoint: endpoint.clone(),
                     req: context.req.read().clone(),
-                    response: OnceLock::new(),
+                    ..Default::default()
                 });
             }
 

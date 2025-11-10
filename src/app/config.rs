@@ -5,6 +5,7 @@ use derive_builder::Builder;
 use rtb::server::TlsConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct BidderConfig {
@@ -33,6 +34,10 @@ pub struct EventConfig {
     pub domain: String,
     /// The preferred path to use in event urls for billing events, e.g. /billing
     pub billing_path: String,
+    /// The length of time we cache demand event URLs, and how long we will
+    /// wait to consider an impression valid
+    #[serde(with = "humantime_serde")]
+    pub ttl: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]

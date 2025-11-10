@@ -4,3 +4,4 @@ rex.yaml
 docker/datadog/.env
 docker/signoz/.env
 docker/*/data/
+.DS_Store

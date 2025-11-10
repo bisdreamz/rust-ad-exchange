@@ -4,11 +4,15 @@ use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use std::sync::OnceLock;
 use tracing::{Instrument, debug, trace, warn};
 
 fn expand_requests(callouts: Vec<BidderCallout>) -> Vec<BidderCallout> {
     let mut expanded_callouts = Vec::with_capacity(callouts.len() * 2);
+
+    if callouts.len() == 1 && callouts.first().unwrap().req.imp.len() == 1 {
+        // if only one req exists and its 1 imp anyway.. short circuit return our arg
+        return callouts;
+    }
 
     for callout in callouts {
         if callout.req.imp.len() == 1 {
@@ -26,10 +30,9 @@ fn expand_requests(callouts: Vec<BidderCallout>) -> Vec<BidderCallout> {
             expanded_request.imp.push(imp);
 
             expanded_callouts.push(BidderCallout {
-                skip_reason: OnceLock::new(),
                 endpoint: callout.endpoint.clone(),
                 req: expanded_request,
-                response: OnceLock::new(),
+                ..Default::default()
             });
         }
     }
@@ -120,7 +123,7 @@ mod tests {
     use crate::core::models::bidder::Endpoint;
     use rtb::BidRequestBuilder;
     use rtb::bid_request::ImpBuilder;
-    use std::sync::Arc;
+    use std::sync::{Arc, OnceLock};
 
     fn create_test_endpoint() -> Arc<Endpoint> {
         Arc::new(Endpoint::default())
@@ -141,10 +144,9 @@ mod tests {
             .unwrap();
 
         let callout = BidderCallout {
-            skip_reason: OnceLock::new(),
             endpoint: endpoint.clone(),
             req,
-            response: OnceLock::new(),
+            ..Default::default()
         };
 
         let result = expand_requests(vec![callout]);
@@ -178,10 +180,10 @@ mod tests {
             .unwrap();
 
         let callout = BidderCallout {
-            skip_reason: OnceLock::new(),
             endpoint: endpoint.clone(),
             req,
             response: OnceLock::new(),
+            ..Default::default()
         };
 
         let result = expand_requests(vec![callout]);
@@ -228,16 +230,14 @@ mod tests {
 
         let callouts = vec![
             BidderCallout {
-                skip_reason: OnceLock::new(),
                 endpoint: endpoint.clone(),
                 req: single_imp_req,
-                response: OnceLock::new(),
+                ..Default::default()
             },
             BidderCallout {
-                skip_reason: OnceLock::new(),
                 endpoint: endpoint.clone(),
                 req: multi_imp_req,
-                response: OnceLock::new(),
+                ..Default::default()
             },
         ];
 
@@ -285,10 +285,9 @@ mod tests {
                 multi_imp: false,
             }),
             callouts: vec![BidderCallout {
-                skip_reason: OnceLock::new(),
                 endpoint: endpoint.clone(),
                 req: callout_req,
-                response: OnceLock::new(),
+                ..Default::default()
             }],
         };
 

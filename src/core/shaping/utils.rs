@@ -3,7 +3,7 @@ use logictree::Feature;
 use rtb::BidRequest;
 use rtb::bid_request::{Banner, DistributionchannelOneof};
 use rtb::bid_response::Bid;
-use rtb::utils::adformats::AdFormat;
+use rtb::utils::adm::AdFormat;
 use smallvec::SmallVec;
 
 pub const MISSING_STR: &str = "*";
@@ -177,7 +177,8 @@ fn extract_buyer_user_matched(req: &BidRequest) -> Feature {
             req.user.is_some() && !req.user.as_ref().unwrap().buyeruid.is_empty()
         }
         DistributionchannelOneof::App(_) => {
-            req.device.is_some() && !req.device.as_ref().unwrap().ifa.is_empty()
+            let ifa = &req.device.as_ref().unwrap().ifa;
+            !ifa.is_empty() && !ifa.starts_with("0000")
         }
         _ => true, // just treat as matched for other channels for now
     };

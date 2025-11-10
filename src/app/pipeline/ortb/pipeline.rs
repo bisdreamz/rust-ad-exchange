@@ -1,8 +1,5 @@
 use crate::app::context::StartupContext;
-use crate::app::pipeline::ortb::tasks::{
-    BidSettlementTask, MultiImpBreakoutTask, NotificationsUrlInjectionTask, QpslimiterTask,
-    TrafficShapingTask,
-};
+use crate::app::pipeline::ortb::tasks::{BidSettlementTask, FloorsMarkupTask, NotificationsUrlCreationTask, NotificationsUrlInjectionTask, RecordShapingTrainingTask};
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
 use anyhow::{Error, anyhow, bail};
@@ -37,6 +34,11 @@ pub fn build_auction_pipeline(
         .take()
         .ok_or(anyhow::anyhow!("Device lookup not set"))?;
 
+    let demand_url_cache = context
+        .demand_url_cache
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Demand url cache not set"))?;
+
     let bidder_manager = match context.bidder_manager.get() {
         Some(bidder_manager) => bidder_manager,
         None => bail!("No Bidder Manager?! Cant build rtb pipeline"),
@@ -47,11 +49,18 @@ pub fn build_auction_pipeline(
         None => bail!("No publisher manager?! Cant build rtb pipeline"),
     };
 
+    let shaping_manager = match context.shaping_manager.get() {
+        Some(shaping_manager) => shaping_manager,
+        None => bail!("No shaping manager?! Cant build rtb pipeline"),
+    };
+
     let config = context.config.get().ok_or(anyhow!(
         "RTB pipeline config not set when configuring rtb pipeline"
     ))?;
 
-    let demand_client = DemandClient::new().expect("DemandClient failed todo task for it");
+    let demand_client =
+        DemandClient::new().or_else(|e| bail!("RTB pipeline client failed: {}", e))?;
+
     let events_config = &config.notifications;
 
     let rtb_pipeline = PipelineBuilder::new()
@@ -65,14 +74,22 @@ pub fn build_auction_pipeline(
         .with_async(Box::new(tasks::BidderMatchingTask::new(
             bidder_manager.clone(),
         )))
-        .with_async(Box::new(MultiImpBreakoutTask))
-        .with_async(Box::new(TrafficShapingTask::new(bidder_manager)))
-        .with_async(Box::new(QpslimiterTask::new(bidder_manager)))
+        .with_async(Box::new(FloorsMarkupTask))
+        .with_async(Box::new(tasks::MultiImpBreakoutTask))
+        .with_async(Box::new(tasks::TrafficShapingTask::new(
+            shaping_manager.clone(),
+        )))
+        .with_async(Box::new(tasks::QpslimiterTask::new(bidder_manager)))
         .with_async(Box::new(tasks::BidderCalloutsTask::new(demand_client)))
         .with_async(Box::new(tasks::TestBidderTask))
-        .with_async(Box::new(NotificationsUrlInjectionTask::new(
+        .with_async(Box::new(tasks::BidMarginTask))
+        .with_async(Box::new(NotificationsUrlCreationTask::new(
             events_config.domain.clone(),
             events_config.billing_path.clone(),
+        )))
+        .with_async(Box::new(RecordShapingTrainingTask))
+        .with_async(Box::new(NotificationsUrlInjectionTask::new(
+            demand_url_cache.clone(),
         )))
         .with_async(Box::new(BidSettlementTask))
         .build()

@@ -12,6 +12,8 @@ pub(crate) struct HandlerState {
     pub auctions: u64,
     /// Sum of total impressions available across 'requests' sent
     pub bids: u64,
+    /// Sum of bid CPM value (the bid based RPM counterpart)
+    pub bids_value: f64,
     /// Count of unique impressions billed
     pub impressions: u64,
     /// CPM sum of billed gross revenue as charged to demand
@@ -25,6 +27,7 @@ impl HandlerState {
     fn add(&mut self, input: &RtbTrainingInput) {
         self.auctions += input.auctions as u64;
         self.bids += input.bids as u64;
+        self.bids_value += input.bid_value as f64;
         self.impressions += input.impressions as u64;
         self.rev_gross += input.rev_gross as f64;
         self.rev_cost += input.rev_cost as f64;
@@ -33,6 +36,7 @@ impl HandlerState {
     fn merge(&mut self, state: &HandlerState) {
         self.auctions += state.auctions;
         self.bids += state.bids;
+        self.bids_value += state.bids_value;
         self.impressions += state.impressions;
         self.rev_gross += state.rev_gross;
         self.rev_cost += state.rev_cost;
@@ -60,6 +64,17 @@ impl RtbPredictionOutput {
         let cpm_auction_factor = 1_000.0 / self.state.auctions as f64;
 
         self.state.rev_gross.mul(cpm_auction_factor) as f32
+    }
+
+    pub fn bid_value_per_mille(&self) -> f32 {
+        if self.state.auctions == 0 || self.state.impressions == 0 {
+            return 0.0;
+        }
+
+        // by 1000 because bid value already in raw CPM sum, not actual dollars
+        let cpm_auction_factor = 1_000.0 / self.state.auctions as f64;
+
+        self.state.bids_value.mul(cpm_auction_factor) as f32
     }
 
     /// The effective fill rate as defined by impressions
@@ -91,6 +106,7 @@ pub struct RtbTrainingInput {
     pub auctions: u32,
     pub bids: u32,
     pub impressions: u32,
+    pub bid_value: f32,
     pub rev_gross: f32,
     pub rev_cost: f32,
 }

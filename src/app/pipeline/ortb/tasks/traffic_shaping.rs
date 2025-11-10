@@ -1,67 +1,45 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext, CalloutSkipReason};
-use crate::core::managers::BidderManager;
-use crate::core::models::shaping::TrafficShaping;
-use crate::core::shaping::tree::{ShapingDecision, TreeShaper};
+use crate::core::managers::ShaperManager;
+use crate::core::shaping::tree::ShapingDecision;
 use anyhow::Error;
 use async_trait::async_trait;
+use opentelemetry::metrics::{Counter, Gauge, Histogram};
+use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
 use rtb::{BidRequest, child_span_info};
-use std::collections::HashMap;
-use std::time::Duration;
-use tracing::{Instrument, debug, info, warn};
+use std::sync::{Arc, LazyLock};
+use tracing::{Instrument, debug, warn};
+
+static COUNTER_SHAPING_OUTCOMES: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    global::meter("rex:demand:shaping")
+        .u64_counter("shaping.calls")
+        .with_description("Count of per endpoint shaping decisions")
+        .with_unit("1")
+        .build()
+});
+
+static GAUGE_SHAPING_METRICS: LazyLock<Gauge<f64>> = LazyLock::new(|| {
+    global::meter("rex:demand:shaping")
+        .f64_gauge("shaping.metrics_threshold")
+        .with_description("The dynamic threshold to pass traffic shaping")
+        .build()
+});
+
+static HISTOGRAM_METRIC_VALUES: LazyLock<Histogram<f64>> = LazyLock::new(|| {
+    global::meter("rex:demand:shaping")
+        .f64_histogram("shaping.metric_values")
+        .with_description("Distribution of all predicted metric values")
+        .build()
+});
 
 pub struct TrafficShapingTask {
-    endpoints: HashMap<String, Option<TreeShaper>>,
+    manager: Arc<ShaperManager>,
 }
 
 impl TrafficShapingTask {
-    pub fn new(manager: &BidderManager) -> Self {
-        let mut shape_map = HashMap::new();
-
-        for (bidder, endpoints) in manager.bidders() {
-            for endpoint in endpoints {
-                if endpoint.enabled == false {
-                    debug!("Skipping endpoint {} because it is not enabled", endpoint.name);
-                    continue;
-                }
-
-                let shaping_opt = match &endpoint.shaping {
-                    TrafficShaping::None => {
-                        info!(
-                            "Bidder {} endpoint {} disabled shaping",
-                            bidder.name, endpoint.name
-                        );
-                        None
-                    }
-                    TrafficShaping::Tree {
-                        control_percent,
-                        metric,
-                        features,
-                    } => {
-                        info!(
-                            "Bidder {} endpoint {} shaping ctrl {}% metric {} features {:?}",
-                            bidder.name, endpoint.name, control_percent, metric, features
-                        );
-
-                        Some(TreeShaper::new(
-                            &features,
-                            &metric,
-                            1000,
-                            &Duration::from_secs(10 * 60),
-                            control_percent.clone(),
-                            endpoint.qps as u32
-                        ))
-                    }
-                };
-
-                shape_map.insert(endpoint.name.clone(), shaping_opt);
-            }
-        }
-
-        Self {
-            endpoints: shape_map,
-        }
+    pub fn new(manager: Arc<ShaperManager>) -> Self {
+        Self { manager }
     }
 
     fn evaluate_record_endpoint(
@@ -70,28 +48,34 @@ impl TrafficShapingTask {
         callout: &BidderCallout,
         req: &BidRequest,
     ) {
-        let shaper_opt = match self.endpoints.get(&callout.endpoint.name) {
+        let shaper = match self
+            .manager
+            .shaper(&bidder_context.bidder.name, &callout.endpoint.name)
+        {
             Some(shaper) => shaper,
             None => {
-                // all should have a Some/None entry
-                warn!(
-                    "No shaping settings registered for endpoint {}! Skipping!",
+                debug!(
+                    "No shaping enabled for endpoint {}! Skipping!",
                     callout.endpoint.name
                 );
                 return;
             }
         };
 
-        let shaper = match shaper_opt {
-            Some(shaper) => shaper,
-            None => {
-                debug!(
-                    "Shaping disabled for endpoint {}, skipping",
-                    callout.endpoint.name
-                );
-                return;
-            }
-        };
+        let span = child_span_info!(
+            "shaping_evaluate_record_endpoint",
+            bidder_name = tracing::field::Empty,
+            endpoint_name = tracing::field::Empty,
+            outcome = tracing::field::Empty,
+            metric_value = tracing::field::Empty,
+            metric_target = tracing::field::Empty,
+            feature_string = tracing::field::Empty,
+        );
+
+        callout
+            .shaping
+            .set(shaper.clone())
+            .unwrap_or_else(|_| warn!("Someone attached shaper to callout context already!"));
 
         match shaper.passes_shaping(req) {
             Ok(res) => {
@@ -99,6 +83,28 @@ impl TrafficShapingTask {
                     "Bidder {} endpoint {} shaping result: {:?}",
                     bidder_context.bidder.name, callout.endpoint.name, res
                 );
+
+                if !span.is_disabled() {
+                    span.record("bidder_name", bidder_context.bidder.name.clone());
+                    span.record("endpoint_name", callout.endpoint.name.clone());
+                    span.record("outcome", res.decision.to_string());
+                    span.record("metric_value", res.metric_value);
+                    span.record("metric_target", res.metric_target);
+                    span.record("features", format!("{:?}", res.features));
+                }
+
+                let mut attrs = vec![
+                    KeyValue::new("bidder", bidder_context.bidder.name.clone()),
+                    KeyValue::new("endpoint", callout.endpoint.name.clone()),
+                ];
+
+                GAUGE_SHAPING_METRICS.record(res.metric_target as f64, &attrs);
+
+                attrs.push(KeyValue::new("pred_depth", res.pred_depth.to_string()));
+                attrs.push(KeyValue::new("outcome", res.decision.to_string()));
+
+                COUNTER_SHAPING_OUTCOMES.add(1, &attrs);
+                HISTOGRAM_METRIC_VALUES.record(res.metric_value as f64, &attrs);
 
                 if matches!(res.decision, ShapingDecision::Blocked) {
                     callout
@@ -110,6 +116,15 @@ impl TrafficShapingTask {
                 }
             }
             Err(err) => {
+                COUNTER_SHAPING_OUTCOMES.add(
+                    1,
+                    &[
+                        KeyValue::new("outcome", "prediction_error".to_string()),
+                        KeyValue::new("bidder", bidder_context.bidder.name.clone()),
+                        KeyValue::new("endpoint", callout.endpoint.name.clone()),
+                    ],
+                );
+
                 warn!(
                     "Shaping failed for endpoint {}: {}",
                     callout.endpoint.name, err

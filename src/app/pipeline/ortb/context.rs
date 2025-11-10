@@ -1,17 +1,19 @@
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::models::publisher::Publisher;
+use crate::core::shaping::tree::TreeShaper;
+use derivative::Derivative;
 use derive_builder::Builder;
 use parking_lot::RwLock;
 use rtb::bid_response::{Bid, SeatBid};
+use rtb::common::DataUrl;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
-use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct BidContext {
     pub bid_event_id: String,
     pub bid: Bid,
@@ -22,6 +24,9 @@ pub struct BidContext {
     pub filter_reason: Option<(u32, String)>,
     /// reduced bid price after margin. None if not yet applied.
     pub reduced_bid_price: Option<f64>,
+    /// Structured notification URLs which tasks may optionally attach metadata to,
+    ///and retrieve later post adm pixel/burl/etc firing
+    pub notifications: NoticeUrls,
 }
 
 impl BidContext {
@@ -32,17 +37,18 @@ impl BidContext {
             reduced_bid_price: None,
             filter_reason: None,
             bid,
+            ..Default::default()
         }
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct SeatBidContext {
     pub seat: SeatBid,
     pub bids: Vec<BidContext>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct BidResponseContext {
     /// The original response as it arrived from the bidder, less the seatbids and bids
     /// which ownership has been moved into their corresponding context objects
@@ -75,7 +81,8 @@ impl BidResponseContext {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, EnumString, AsRefStr)]
+#[derive(Debug, Clone, Default, EnumString, AsRefStr)]
+#[allow(unused)]
 pub enum BidderResponseState {
     /// Bidder failed to respond within time
     #[default]
@@ -91,19 +98,31 @@ pub enum BidderResponseState {
     Bid(BidResponseContext),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+#[derive(Debug, Clone, Default, Builder)]
 pub struct BidderResponse {
     pub state: BidderResponseState,
     pub latency: Duration,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumString, AsRefStr, Display)]
+#[derive(Debug, Clone, PartialEq, EnumString, AsRefStr, Display)]
 pub enum CalloutSkipReason {
     TrafficShaping,
     QpsLimit,
 }
 
-#[derive(Debug, Default)]
+/// The ['DataUrl'] notification events are sent to,
+/// which enables tasks to attach and retrieve additional
+/// meta data as needed
+#[derive(Debug, Clone, Default)]
+pub struct NoticeUrls {
+    /// The url invoked upon billing event, which may be from the burl or adm pixel
+    /// depending on publisher configuration
+    pub billing: OnceLock<DataUrl>,
+    // loss, nurl, etc when needed
+}
+
+#[derive(Derivative)]
+#[derivative(Debug, Default)]
 pub struct BidderCallout {
     /// The reason this bid request to the associated endpoint should be skipped, see
     /// ['CalloutSkipReason']
@@ -115,6 +134,8 @@ pub struct BidderCallout {
     pub req: BidRequest,
     /// The ['BidderResponse'] if any after auction callout
     pub response: OnceLock<BidderResponse>,
+    #[derivative(Debug = "ignore", Default(value = "OnceLock::new()"))]
+    pub shaping: OnceLock<Arc<TreeShaper>>,
 }
 
 /// Bidder context

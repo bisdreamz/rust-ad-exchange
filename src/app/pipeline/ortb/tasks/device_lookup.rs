@@ -1,10 +1,12 @@
 use crate::app::pipeline::ortb::context::AuctionContext;
+use crate::app::pipeline::ortb::telemetry;
 use crate::core::enrichment::device::{DeviceLookup, DeviceType};
 use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::bid_request::Device;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
+use tracing::Span;
 use tracing::log::debug;
 
 pub struct DeviceLookupTask {
@@ -23,6 +25,7 @@ impl DeviceLookupTask {
 
 impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
+        let parent_span = Span::current();
         let span = child_span_info!(
             "device_lookup_task",
             dev_lookup_result = tracing::field::Empty,
@@ -59,6 +62,7 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
                 .expect("Someone already set a BidResponseState!");
 
             span.record("dev_lookup_result", "no_ua_result");
+            parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_unknown");
 
             return Err(anyhow!("Unrecognized device ua"));
         }
@@ -78,6 +82,7 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
                 .expect("Someone already set a BidResponseState!");
 
             span.record("dev_lookup_result", "bot");
+            parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_bot");
 
             return Err(anyhow!("Bot user-agent"));
         }

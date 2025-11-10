@@ -2,12 +2,14 @@ use crate::app::lifecycle::context::StartupContext;
 use crate::app::lifecycle::startup::tasks::config_load::ConfigLoadTask;
 use crate::app::span::WrappedPipelineTask;
 use crate::app::startup::tasks::bidders_load::BidderManagerLoadTask;
+use crate::app::startup::tasks::demand_url_cache::DemandUrlCacheStartTask;
 use crate::app::startup::tasks::device_load::DeviceLookupLoadTask;
 use crate::app::startup::tasks::event_pipeline::BuildEventPipelineTask;
 use crate::app::startup::tasks::ip_risk_load::IpRiskLoadTask;
 use crate::app::startup::tasks::observability::ConfigureObservabilityTask;
 use crate::app::startup::tasks::pubs_load::PubsManagerLoadTask;
 use crate::app::startup::tasks::rtb_pipeline::BuildRtbPipelineTask;
+use crate::app::startup::tasks::shapers_load::ShapersManagerLoadTask;
 use crate::app::startup::tasks::start_server::StartServerTask;
 use crate::core::config_manager::ConfigManager;
 use pipeline::{Pipeline, PipelineBuilder};
@@ -32,9 +34,11 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
     // log them during startup/shutdown and dont need to filter those
     let start_pipeline = PipelineBuilder::new()
         .with_blocking(Box::new(BidderManagerLoadTask::new(cfg_manager.clone())))
+        .with_blocking(Box::new(ShapersManagerLoadTask))
         .with_blocking(Box::new(PubsManagerLoadTask::new(cfg_manager.clone())))
         .with_async(Box::new(IpRiskLoadTask))
         .with_async(Box::new(DeviceLookupLoadTask))
+        .with_blocking(Box::new(DemandUrlCacheStartTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(BuildRtbPipelineTask))
         .with_blocking(Box::new(BuildEventPipelineTask))
         .with_async(Box::new(StartServerTask))

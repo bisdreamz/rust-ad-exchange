@@ -1,7 +1,7 @@
 use anyhow::{Error, anyhow, bail};
 use rtb::bid_response::Bid;
 use rtb::bid_response::bid::AdmOneof;
-use rtb::utils::adformats::AdFormat;
+use rtb::utils::adm::AdFormat;
 use rtb::utils::trackers::VastTrackersBuilder;
 
 fn inject_banner_beacon(beacon_url: &String, bid: &mut Bid) -> Result<(), Error> {

@@ -1,8 +1,9 @@
-use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::{AuctionContext, telemetry};
 use anyhow::{Error, anyhow, bail};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
+use tracing::Span;
 use tracing::log::debug;
 
 /// Will hard block inbound requests which exceed the
@@ -19,6 +20,7 @@ impl SchainHopsGlobalFilter {
 
 impl BlockingTask<AuctionContext, Error> for SchainHopsGlobalFilter {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
+        let parent_span = Span::current();
         let span = child_span_info!(
             "schain_hops_filter_task",
             hops_filter_result = tracing::field::Empty,
@@ -63,7 +65,7 @@ impl BlockingTask<AuctionContext, Error> for SchainHopsGlobalFilter {
             span.record("hops_filter_result", "passed_no_source.schain");
             span.record("hops_filter_len", 0);
 
-            debug!("Source object present, but no sourcr.schain. Passing schain len filter");
+            debug!("Source object present, but no source.schain. Passing schain len filter");
 
             return Ok(());
         }
@@ -73,6 +75,7 @@ impl BlockingTask<AuctionContext, Error> for SchainHopsGlobalFilter {
         if schain.nodes.len() > self.hop_limit as usize {
             span.record("hops_filter_result", "blocked_too_many");
             span.record("hops_filter_len", schain.nodes.len());
+            parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "schain_length");
 
             let brs = BidResponseState::NoBidReason {
                 reqid: req.id.clone(),

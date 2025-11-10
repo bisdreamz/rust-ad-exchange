@@ -100,13 +100,13 @@ fn build_psa_bidder_context(req: BidRequest, bids: Vec<Bid>) -> Result<BidderCon
     callout_response.set(bidder_response).unwrap();
 
     let bidder_callout = BidderCallout {
-        skip_reason: OnceLock::new(),
         endpoint: Arc::new(Endpoint {
             name: "test_endpoint".to_string(),
             ..Default::default()
         }),
         req,
         response: callout_response,
+        ..Default::default()
     };
 
     let test_bidder = BidderBuilder::default()
@@ -126,11 +126,12 @@ impl AsyncTask<AuctionContext, Error> for TestBidderTask {
     async fn run(&self, context: &AuctionContext) -> Result<(), Error> {
         let req;
         {
-            req = context.req.read().clone();
-        }
+            let req_read = context.req.read();
+            if !req_read.test {
+                return Ok(());
+            }
 
-        if !req.test {
-            return Ok(());
+            req = req_read.clone();
         }
 
         let force_bid = match req.ext {
