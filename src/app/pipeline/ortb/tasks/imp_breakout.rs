@@ -283,6 +283,7 @@ mod tests {
                 name: "test_bidder".to_string(),
                 gzip: false,
                 multi_imp: false,
+                usersync: None,
             }),
             callouts: vec![BidderCallout {
                 endpoint: endpoint.clone(),

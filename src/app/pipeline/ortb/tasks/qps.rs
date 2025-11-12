@@ -22,7 +22,7 @@ impl QpslimiterTask {
     pub fn new(bidder_manager: &BidderManager) -> Self {
         let mut endpoints_limiters = HashMap::new();
 
-        bidder_manager.bidders().iter().for_each(|(_, endpoints)| {
+        bidder_manager.bidders_endpoints().iter().for_each(|(_, endpoints)| {
             for endpoint in endpoints {
                 if !endpoint.enabled {
                     continue;

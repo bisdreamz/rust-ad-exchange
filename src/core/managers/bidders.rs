@@ -23,7 +23,14 @@ impl BidderManager {
         }
     }
 
-    pub fn bidders(&self) -> &Vec<(Arc<Bidder>, Vec<Arc<Endpoint>>)> {
+    pub fn bidders_endpoints(&self) -> &Vec<(Arc<Bidder>, Vec<Arc<Endpoint>>)> {
         &self.bidders
+    }
+
+    pub fn bidders(&self) -> Vec<Arc<Bidder>> {
+        self.bidders
+            .iter()
+            .map(|(bidder, _)| Arc::clone(bidder))
+            .collect()
     }
 }

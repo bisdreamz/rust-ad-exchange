@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::app::lifecycle::context::StartupContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
@@ -14,7 +15,10 @@ use rtb::server::json::{FastJson, JsonBidResponseState};
 use rtb::server::{Server, ServerConfig};
 use rtb::{BidRequest, sample_or_attach_root_span};
 use std::sync::{Arc, LazyLock};
+use actix_web::cookie::Cookie;
 use tracing::{Instrument, debug, info, instrument};
+use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
+use crate::core::usersync;
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex")
@@ -164,6 +168,64 @@ async fn billing_event_handler(
     }
 }
 
+async fn sync_out_handler(
+    pubid: String,
+    http_req: HttpRequest,
+    pipeline: Arc<Pipeline<SyncOutContext, Error>>,
+) -> impl Responder {
+    let cookies: HashMap<String, String> = http_req
+        .cookies()
+        .map_or_else(
+            |_| HashMap::new(),
+            |jar| jar.iter()
+                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .collect()
+        );
+
+    let context = SyncOutContext::new(pubid, cookies);
+
+    if let Err(e) = pipeline.run(&context).await {
+        debug!("Sync-out pipeline aborted: {}", e);
+        return HttpResponse::BadRequest().finish()
+    }
+
+    if context.response.get().is_none() {
+        warn!("Cookie init sync returned Ok but no response attached!");
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    let local_uid = context.local_id.get();
+    let cookie_param_key = usersync::constants::CONST_REX_COOKIE_ID;
+
+    match context.response.get().unwrap() {
+        SyncResponse::Content(html) => {
+            debug!("Sync-out response content: {}", html);
+            let mut response = HttpResponse::Ok();
+            response.content_type("text/html");
+            if let Some(uid) = local_uid {
+                response.cookie(Cookie::new(cookie_param_key, uid.clone()));
+            }
+            response.body(html.clone())
+        },
+        SyncResponse::Error(err) => {
+            warn!("Error response encountered during sync out pipeline: {}", err);
+            let mut response = HttpResponse::InternalServerError();
+            if let Some(uid) = local_uid {
+                response.cookie(Cookie::new(cookie_param_key, uid.clone()));
+            }
+            response.finish()
+        },
+        SyncResponse::NoContent => {
+            debug!("No content response during sync. Perhaps no bidders?");
+            let mut response = HttpResponse::NoContent();
+            if let Some(uid) = local_uid {
+                response.cookie(Cookie::new(cookie_param_key, uid.clone()));
+            }
+            response.finish()
+        }
+    }
+}
+
 #[async_trait]
 impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
     #[instrument(skip_all, name = "start_server_task")]
@@ -187,6 +249,12 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .auction_pipeline
             .get()
             .ok_or(anyhow::anyhow!("RTB pipeline not built"))?
+            .clone();
+
+        let sync_out_pipeline = ctx
+            .sync_out_pipeline
+            .get()
+            .ok_or(anyhow::anyhow!("Sync-out pipeline not built"))?
             .clone();
 
         let span_sample_rate = ctx
@@ -234,7 +302,20 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                             }
                         }
                     }),
-                );
+                )
+                .route(
+                    "/sync/out/{pubid}",
+                    web::get().to({
+                    let pipeline = sync_out_pipeline.clone();
+
+                    move |pubid: web::Path<String>, http_req: HttpRequest| {
+                        let pubid = pubid.into_inner();
+                        let p = pipeline.clone();
+                        async move {
+                            sync_out_handler(pubid, http_req, p).await
+                        }
+                    }
+                }));
         })
         .await?;
 

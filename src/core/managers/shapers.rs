@@ -26,7 +26,7 @@ impl ShaperManager {
     pub fn new(manager: &BidderManager) -> Result<Self, Error> {
         let mut shape_map = HashMap::new();
 
-        for (bidder, endpoints) in manager.bidders() {
+        for (bidder, endpoints) in manager.bidders_endpoints() {
             for endpoint in endpoints {
                 if endpoint.enabled == false {
                     debug!(

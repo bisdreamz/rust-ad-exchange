@@ -16,6 +16,7 @@ use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{Span, info_span};
+use crate::app::startup::tasks::sync_pipelines::BuildSyncPipelinesTask;
 
 /// Builds the graceful ordering of startup tasks required for a successful startup.
 /// Configures logging, builds the request pipelines, all that good stuff
@@ -41,6 +42,7 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .with_blocking(Box::new(DemandUrlCacheStartTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(BuildRtbPipelineTask))
         .with_blocking(Box::new(BuildEventPipelineTask))
+        .with_blocking(Box::new(BuildSyncPipelinesTask))
         .with_async(Box::new(StartServerTask))
         .build()
         .expect("Startup pipeline should have tasks!");

@@ -10,6 +10,7 @@ use anyhow::Error;
 use pipeline::Pipeline;
 use rtb::server::Server;
 use std::sync::{Arc, Mutex, OnceLock};
+use crate::app::pipeline::syncing::out::context::SyncOutContext;
 
 #[derive(Default)]
 pub struct StartupContext {
@@ -40,7 +41,8 @@ pub struct StartupContext {
     pub auction_pipeline: OnceLock<Arc<Pipeline<AuctionContext, Error>>>,
     /// The pipeline which handles billing event events, regardless of source (adm, burl..)
     pub event_pipeline: OnceLock<Arc<Pipeline<BillingEventContext, Error>>>,
-
+    /// The pipeline which handles firing of our user sync pixel, which starts outbound demand sync
+    pub sync_out_pipeline: OnceLock<Arc<Pipeline<SyncOutContext, Error>>>,
     /// The web server
     pub server: OnceLock<Server>,
 }
