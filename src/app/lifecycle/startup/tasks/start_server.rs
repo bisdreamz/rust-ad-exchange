@@ -1,7 +1,10 @@
-use std::collections::HashMap;
 use crate::app::lifecycle::context::StartupContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::syncing::r#in::context::SyncInContext;
+use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
+use crate::core::usersync;
+use actix_web::cookie::Cookie;
 use actix_web::web;
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use anyhow::{Error, anyhow, bail};
@@ -14,11 +17,9 @@ use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::json::{FastJson, JsonBidResponseState};
 use rtb::server::{Server, ServerConfig};
 use rtb::{BidRequest, sample_or_attach_root_span};
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use actix_web::cookie::Cookie;
 use tracing::{Instrument, debug, info, instrument};
-use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
-use crate::core::usersync;
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex")
@@ -81,9 +82,10 @@ async fn handle_bid_request_instrumented(
     pubid: String,
     source: String,
     req: BidRequest,
+    cookies: Option<HashMap<String, String>>,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
 ) -> (BidResponseState, bool) {
-    let mut ctx = AuctionContext::new(source.clone(), pubid, req);
+    let mut ctx = AuctionContext::new(source.clone(), pubid, req, cookies);
 
     let pipeline_result = pipeline.run(&ctx).await;
 
@@ -107,6 +109,7 @@ async fn handle_bid_request(
     pubid: String,
     source: String,
     req: BidRequest,
+    cookies: Option<HashMap<String, String>>,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
     span_sample_rate: f32,
 ) -> (BidResponseState, bool) {
@@ -117,7 +120,7 @@ async fn handle_bid_request(
         source = source,
     );
 
-    handle_bid_request_instrumented(pubid, source, req, pipeline)
+    handle_bid_request_instrumented(pubid, source, req, cookies, pipeline)
         .instrument(root_span)
         .await
 }
@@ -132,11 +135,13 @@ async fn json_bid_handler(
     let source = http_req.match_pattern().unwrap_or("unknown".to_string());
     let start = std::time::Instant::now();
     let path = http_req.path().to_string();
+    let cookies = extract_cookies(&http_req);
 
     let (brs, pipeline_completed) = handle_bid_request(
         pubid.clone(),
         path.clone(),
         req.into_inner(),
+        Some(cookies),
         pipeline.clone(),
         span_sample_rate,
     )
@@ -168,34 +173,51 @@ async fn billing_event_handler(
     }
 }
 
+fn extract_cookies(http_req: &HttpRequest) -> HashMap<String, String> {
+    http_req.cookies().map_or_else(
+        |_| HashMap::new(),
+        |jar| {
+            jar.iter()
+                .map(|c| (c.name().to_string(), c.value().to_string()))
+                .collect()
+        },
+    )
+}
+
 async fn sync_out_handler(
     pubid: String,
     http_req: HttpRequest,
     pipeline: Arc<Pipeline<SyncOutContext, Error>>,
 ) -> impl Responder {
-    let cookies: HashMap<String, String> = http_req
-        .cookies()
-        .map_or_else(
-            |_| HashMap::new(),
-            |jar| jar.iter()
-                .map(|c| (c.name().to_string(), c.value().to_string()))
-                .collect()
-        );
-
+    let cookies = extract_cookies(&http_req);
     let context = SyncOutContext::new(pubid, cookies);
+    let cookie_param_key = usersync::constants::CONST_REX_COOKIE_ID_PARAM;
 
     if let Err(e) = pipeline.run(&context).await {
         debug!("Sync-out pipeline aborted: {}", e);
-        return HttpResponse::BadRequest().finish()
+        let mut response = HttpResponse::BadRequest();
+        if let Some(uid) = context.local_uid.get() {
+            let cookie = Cookie::build(cookie_param_key, uid.clone())
+                .path("/")
+                .finish();
+            response.cookie(cookie);
+        }
+        return response.finish();
     }
 
     if context.response.get().is_none() {
         warn!("Cookie init sync returned Ok but no response attached!");
-        return HttpResponse::InternalServerError().finish();
+        let mut response = HttpResponse::InternalServerError();
+        if let Some(uid) = context.local_uid.get() {
+            let cookie = Cookie::build(cookie_param_key, uid.clone())
+                .path("/")
+                .finish();
+            response.cookie(cookie);
+        }
+        return response.finish();
     }
 
-    let local_uid = context.local_id.get();
-    let cookie_param_key = usersync::constants::CONST_REX_COOKIE_ID;
+    let local_uid = context.local_uid.get();
 
     match context.response.get().unwrap() {
         SyncResponse::Content(html) => {
@@ -203,25 +225,54 @@ async fn sync_out_handler(
             let mut response = HttpResponse::Ok();
             response.content_type("text/html");
             if let Some(uid) = local_uid {
-                response.cookie(Cookie::new(cookie_param_key, uid.clone()));
+                let cookie = Cookie::build(cookie_param_key, uid.clone())
+                    .path("/")
+                    .finish();
+                response.cookie(cookie);
             }
             response.body(html.clone())
-        },
+        }
         SyncResponse::Error(err) => {
-            warn!("Error response encountered during sync out pipeline: {}", err);
+            warn!(
+                "Error response encountered during sync out pipeline: {}",
+                err
+            );
             let mut response = HttpResponse::InternalServerError();
             if let Some(uid) = local_uid {
-                response.cookie(Cookie::new(cookie_param_key, uid.clone()));
+                let cookie = Cookie::build(cookie_param_key, uid.clone())
+                    .path("/")
+                    .finish();
+                response.cookie(cookie);
             }
             response.finish()
-        },
+        }
         SyncResponse::NoContent => {
             debug!("No content response during sync. Perhaps no bidders?");
             let mut response = HttpResponse::NoContent();
             if let Some(uid) = local_uid {
-                response.cookie(Cookie::new(cookie_param_key, uid.clone()));
+                let cookie = Cookie::build(cookie_param_key, uid.clone())
+                    .path("/")
+                    .finish();
+                response.cookie(cookie);
             }
             response.finish()
+        }
+    }
+}
+
+/// Partners syncing in to us their buyeruid value
+async fn sync_in_handler(
+    http_req: HttpRequest,
+    pipeline: Arc<Pipeline<SyncInContext, Error>>,
+) -> impl Responder {
+    let cookies = extract_cookies(&http_req);
+    let context = SyncInContext::new(http_req.full_url().to_string(), cookies);
+
+    match pipeline.run(&context).await {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => {
+            warn!("Sync-in pipeline aborted: {}", e);
+            HttpResponse::BadRequest().finish()
         }
     }
 }
@@ -255,6 +306,12 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .sync_out_pipeline
             .get()
             .ok_or(anyhow::anyhow!("Sync-out pipeline not built"))?
+            .clone();
+
+        let sync_in_pipeline = ctx
+            .sync_in_pipeline
+            .get()
+            .ok_or(anyhow::anyhow!("Sync-in pipeline not built"))?
             .clone();
 
         let span_sample_rate = ctx
@@ -306,16 +363,26 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                 .route(
                     "/sync/out/{pubid}",
                     web::get().to({
-                    let pipeline = sync_out_pipeline.clone();
+                        let pipeline = sync_out_pipeline.clone();
 
-                    move |pubid: web::Path<String>, http_req: HttpRequest| {
-                        let pubid = pubid.into_inner();
-                        let p = pipeline.clone();
-                        async move {
-                            sync_out_handler(pubid, http_req, p).await
+                        move |pubid: web::Path<String>, http_req: HttpRequest| {
+                            let pubid = pubid.into_inner();
+                            let p = pipeline.clone();
+                            async move { sync_out_handler(pubid, http_req, p).await }
                         }
-                    }
-                }));
+                    }),
+                )
+                .route(
+                    "/sync/in",
+                    web::get().to({
+                        let pipeline = sync_in_pipeline.clone();
+
+                        move |http_req: HttpRequest| {
+                            let p = pipeline.clone();
+                            async move { sync_in_handler(http_req, p).await }
+                        }
+                    }),
+                );
         })
         .await?;
 

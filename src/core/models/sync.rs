@@ -9,7 +9,7 @@ pub enum SyncKind {
     /// User sync deployed as a single img pixel
     Image,
     /// User sync deployed as an iframe, can contain multiple downstream syncs
-    Iframe
+    Iframe,
 }
 
 /// Demand user sync config
@@ -19,4 +19,3 @@ pub struct SyncConfig {
     pub url: String,
     pub kind: SyncKind,
 }
-

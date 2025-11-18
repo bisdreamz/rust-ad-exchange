@@ -8,7 +8,7 @@ default = ["otel-http"]
 otel-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
-rtb-runtime = { path = "../openrtb-rs", features = ["actix-web", "tracing", "simd-json"] }
+rtb-runtime = { path = "../rtb-runtime", features = ["actix-web", "tracing", "simd-json"] }
 logictree = { path = "../logictree" }
 pipeline = {  path = "../pipeline" }
 actix-web = "4.11.0"

@@ -1,5 +1,8 @@
 use crate::app::context::StartupContext;
-use crate::app::pipeline::ortb::tasks::{BidSettlementTask, FloorsMarkupTask, NotificationsUrlCreationTask, NotificationsUrlInjectionTask, RecordShapingTrainingTask};
+use crate::app::pipeline::ortb::tasks::{
+    BidSettlementTask, FloorsMarkupTask, IdentityDemandTask, NotificationsUrlCreationTask,
+    NotificationsUrlInjectionTask, RecordShapingTrainingTask,
+};
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
 use anyhow::{Error, anyhow, bail};
@@ -54,6 +57,11 @@ pub fn build_auction_pipeline(
         None => bail!("No shaping manager?! Cant build rtb pipeline"),
     };
 
+    let sync_store = context
+        .sync_store
+        .get()
+        .ok_or_else(|| anyhow!("No sync store created on context!"))?;
+
     let config = context.config.get().ok_or(anyhow!(
         "RTB pipeline config not set when configuring rtb pipeline"
     ))?;
@@ -71,10 +79,12 @@ pub fn build_auction_pipeline(
         )))
         .with_blocking(Box::new(tasks::IpBlockTask::new(ip_risk_filter)))
         .with_blocking(Box::new(tasks::DeviceLookupTask::new(device_lookup)))
+        .with_blocking(Box::new(tasks::LocalIdentityTask))
         .with_async(Box::new(tasks::BidderMatchingTask::new(
             bidder_manager.clone(),
         )))
         .with_async(Box::new(FloorsMarkupTask))
+        .with_async(Box::new(IdentityDemandTask::new(sync_store.clone())))
         .with_async(Box::new(tasks::MultiImpBreakoutTask))
         .with_async(Box::new(tasks::TrafficShapingTask::new(
             shaping_manager.clone(),

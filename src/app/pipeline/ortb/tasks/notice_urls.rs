@@ -1,16 +1,16 @@
-use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
 use crate::core::events::billing::{BillingEvent, BillingEventBuilder};
 use crate::core::models::bidder::{Bidder, Endpoint};
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use log::debug;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use rtb::common::bidresponsestate::BidResponseState;
 use rtb::common::DataUrl;
+use rtb::common::bidresponsestate::BidResponseState;
 use rtb::utils::detect_ad_format;
-use tracing::{warn, Instrument};
+use tracing::{Instrument, warn};
 
 fn build_billing_event(
     event_id: &String,
@@ -27,7 +27,7 @@ fn build_billing_event(
 
     let cpm_cost = match bid_context.reduced_bid_price {
         Some(price) => price,
-        None => bail!("CPM cost has not ben assigned to bid context! What is our margin?")
+        None => bail!("CPM cost has not ben assigned to bid context! What is our margin?"),
     };
 
     BillingEventBuilder::default()
@@ -53,12 +53,7 @@ fn build_event_url(
     bidder: &Bidder,
     endpoint: &Endpoint,
 ) -> Result<DataUrl, Error> {
-    let billing_event_result = build_billing_event(
-        event_id,
-        bidder,
-        endpoint,
-        &bid_context
-    );
+    let billing_event_result = build_billing_event(event_id, bidder, endpoint, &bid_context);
 
     let billing_event = match billing_event_result {
         Ok(event) => event,

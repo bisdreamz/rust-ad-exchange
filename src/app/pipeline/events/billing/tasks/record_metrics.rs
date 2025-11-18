@@ -1,4 +1,5 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
+use crate::core::events::billing::EventSource;
 use anyhow::{Error, anyhow};
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
@@ -8,7 +9,6 @@ use std::ops::Div;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::debug;
-use crate::core::events::billing::EventSource;
 
 static IMP_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex:events:billing")
@@ -85,7 +85,11 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
             imp_delay.as_secs()
         );
 
-        let source = event.event_source.as_ref().unwrap_or(&EventSource::Unknown).to_string();
+        let source = event
+            .event_source
+            .as_ref()
+            .unwrap_or(&EventSource::Unknown)
+            .to_string();
 
         span.record("pub_id", event.pub_id.clone());
         span.record("bidder_id", event.bidder_id.clone());

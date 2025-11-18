@@ -1,0 +1,2 @@
+### User sync in (demand sending us their buyeruid value)
+GET http://localhost:80/sync/in?buid=123&pid=test

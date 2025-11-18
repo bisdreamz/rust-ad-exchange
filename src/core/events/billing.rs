@@ -38,7 +38,7 @@ pub enum EventSource {
     /// vast Impression entry, or native imptracker
     Adm,
     /// if unassigned or not provided
-    Unknown
+    Unknown,
 }
 
 /// Primary fields used to produce or extract details from a billing event url
@@ -53,7 +53,7 @@ pub struct BillingEvent {
     pub endpoint_id: String,
     pub pub_id: String,
     pub bid_ad_format: AdFormat,
-    pub event_source: Option<EventSource>
+    pub event_source: Option<EventSource>,
 }
 
 impl BillingEvent {
@@ -93,7 +93,10 @@ impl BillingEvent {
             .add_string(FIELD_BID_AD_FORMAT, &self.bid_ad_format.to_string())?;
 
         if self.event_source.is_some() {
-            data_url.add_string(FIELD_EVENT_SOURCE, &self.event_source.as_ref().unwrap().to_string())?;
+            data_url.add_string(
+                FIELD_EVENT_SOURCE,
+                &self.event_source.as_ref().unwrap().to_string(),
+            )?;
         }
 
         Ok(())

@@ -1,6 +1,9 @@
 use crate::app::context::StartupContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
-use crate::app::pipeline::events::billing::tasks::{BailIfExpiredTask, CacheNoticeUrlsValidationTask, ExtractBillingEventTask, FireDemandBurlTask, ParseDataUrlTask, RecordBillingMetricsTask, RecordShapingEventsTask};
+use crate::app::pipeline::events::billing::tasks::{
+    BailIfExpiredTask, CacheNoticeUrlsValidationTask, ExtractBillingEventTask, FireDemandBurlTask,
+    ParseDataUrlTask, RecordBillingMetricsTask, RecordShapingEventsTask,
+};
 use anyhow::{Error, bail};
 use pipeline::{Pipeline, PipelineBuilder};
 
@@ -23,7 +26,9 @@ pub fn build_event_pipeline(
         // Extracts common structured data from the prior data url
         .with_blocking(Box::new(ExtractBillingEventTask))
         // Task validates the impression and looks up partner burls, but doesnt yet bail pipeline
-        .with_blocking(Box::new(CacheNoticeUrlsValidationTask::new(demand_url_cache)))
+        .with_blocking(Box::new(CacheNoticeUrlsValidationTask::new(
+            demand_url_cache,
+        )))
         // Records raw billing metrics regardless of whether imp expired or not
         .with_blocking(Box::new(RecordBillingMetricsTask))
         // Now that we have insights into all event calls (expired or not), bail if invalid event

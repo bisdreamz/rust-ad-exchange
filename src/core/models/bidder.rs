@@ -1,8 +1,8 @@
 use crate::core::models::shaping::TrafficShaping;
+use crate::core::models::sync::SyncConfig;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
-use crate::core::models::sync::SyncConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
 pub struct Targeting {
@@ -49,10 +49,11 @@ pub struct Endpoint {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 #[serde(default)]
 pub struct Bidder {
+    pub id: String,
     pub name: String,
     #[builder(default = "true")]
     pub gzip: bool,
     #[builder(default = "true")]
     pub multi_imp: bool,
-    pub usersync: Option<SyncConfig>
+    pub usersync: Option<SyncConfig>,
 }

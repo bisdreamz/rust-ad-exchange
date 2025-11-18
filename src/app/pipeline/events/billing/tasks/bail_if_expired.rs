@@ -1,7 +1,7 @@
-use anyhow::{bail, Error};
+use crate::app::pipeline::events::billing::context::BillingEventContext;
+use anyhow::{Error, bail};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
-use crate::app::pipeline::events::billing::context::BillingEventContext;
 
 /// Convenience task to check if the context.demand_urls sentinel is present
 /// and bail if not. The demand_urls are used not only to track DSP burls

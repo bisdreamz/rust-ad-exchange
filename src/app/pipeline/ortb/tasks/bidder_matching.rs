@@ -101,7 +101,10 @@ impl BidderMatchingTask {
         let mut bidder_contexts = Vec::new();
         let span = Span::current();
 
-        let matches = get_filtered_matching(self.manager.bidders_endpoints().as_ref(), &*context.req.read());
+        let matches = get_filtered_matching(
+            self.manager.bidders_endpoints().as_ref(),
+            &*context.req.read(),
+        );
 
         if !span.is_disabled() {
             span.record("bidder_matches_count", matches.len());

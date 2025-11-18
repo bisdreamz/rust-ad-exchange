@@ -11,12 +11,14 @@ use crate::app::startup::tasks::pubs_load::PubsManagerLoadTask;
 use crate::app::startup::tasks::rtb_pipeline::BuildRtbPipelineTask;
 use crate::app::startup::tasks::shapers_load::ShapersManagerLoadTask;
 use crate::app::startup::tasks::start_server::StartServerTask;
+use crate::app::startup::tasks::sync_pipelines::BuildSyncPipelinesTask;
+use crate::app::startup::tasks::sync_store_init::SyncStoreInitTask;
 use crate::core::config_manager::ConfigManager;
 use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{Span, info_span};
-use crate::app::startup::tasks::sync_pipelines::BuildSyncPipelinesTask;
 
 /// Builds the graceful ordering of startup tasks required for a successful startup.
 /// Configures logging, builds the request pipelines, all that good stuff
@@ -42,6 +44,9 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .with_blocking(Box::new(DemandUrlCacheStartTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(BuildRtbPipelineTask))
         .with_blocking(Box::new(BuildEventPipelineTask))
+        .with_async(Box::new(SyncStoreInitTask::new(Duration::from_hours(
+            24 * 7,
+        ))))
         .with_blocking(Box::new(BuildSyncPipelinesTask))
         .with_async(Box::new(StartServerTask))
         .build()

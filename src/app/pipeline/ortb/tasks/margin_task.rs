@@ -1,11 +1,11 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderResponseState};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderResponseState};
 use crate::core::demand::takerate;
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use tracing::{debug, warn, Instrument};
+use tracing::{Instrument, debug, warn};
 
 fn apply_margin(callout: &mut BidderCallout, take_rate: u32) {
     let res = match callout.response.get_mut() {
@@ -29,7 +29,9 @@ fn apply_margin(callout: &mut BidderCallout, take_rate: u32) {
             let bid = &mut bid_context.bid;
 
             if bid.price != bid_context.original_bid_price {
-                warn!("Bid object price does not equal recorded original bid price?! Overwriting margin!");
+                warn!(
+                    "Bid object price does not equal recorded original bid price?! Overwriting margin!"
+                );
             }
 
             let reduced_bid = takerate::markdown_bid(bid.price, take_rate);
@@ -37,8 +39,10 @@ fn apply_margin(callout: &mut BidderCallout, take_rate: u32) {
             bid_context.reduced_bid_price.replace(reduced_bid);
             bid.price = reduced_bid;
 
-            debug!("Applied margin of {}% bid ${} -> ${}",
-                take_rate, bid_context.original_bid_price, bid.price);
+            debug!(
+                "Applied margin of {}% bid ${} -> ${}",
+                take_rate, bid_context.original_bid_price, bid.price
+            );
         }
     }
 }
@@ -47,7 +51,9 @@ pub struct BidMarginTask;
 
 impl BidMarginTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
-        let publisher = context.publisher.get()
+        let publisher = context
+            .publisher
+            .get()
             .ok_or_else(|| anyhow!("No publisher associated with margin context!"))?;
 
         for bidder_context in context.bidders.lock().await.iter_mut() {

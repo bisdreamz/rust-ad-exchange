@@ -48,9 +48,14 @@ mod record_shaping;
 
 pub use record_shaping::RecordShapingTrainingTask;
 
-mod margin_task;
 mod floors_markup;
+mod identity_demand;
+mod identity_request;
+mod margin_task;
 
 pub use margin_task::BidMarginTask;
 
 pub use floors_markup::FloorsMarkupTask;
+
+pub use identity_demand::IdentityDemandTask;
+pub use identity_request::LocalIdentityTask;

@@ -1,7 +1,7 @@
+use crate::core::demand::notifications::NoticeUrls;
 use crate::core::events::billing::BillingEvent;
 use rtb::common::DataUrl;
 use std::sync::OnceLock;
-use crate::core::demand::notifications::NoticeUrls;
 
 #[derive(Debug, Default)]
 pub struct BillingEventContext {
@@ -17,7 +17,7 @@ pub struct BillingEventContext {
     /// we also use the presence of this notice container as a de-dupe
     /// mechanism for incoming events. Then if URLs are present optionally,
     /// we will fire them for demand partners
-    pub demand_urls: OnceLock<NoticeUrls>
+    pub demand_urls: OnceLock<NoticeUrls>,
 }
 
 impl BillingEventContext {

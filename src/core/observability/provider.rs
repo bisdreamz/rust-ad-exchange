@@ -11,7 +11,7 @@ use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider, Temporality};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
@@ -322,10 +322,19 @@ fn configure_otel(
 ) -> Result<OtelComponents> {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| env!("CARGO_PKG_NAME").to_string());
-    let resource = Resource::builder()
+
+    // Resource::builder() automatically reads OTEL_RESOURCE_ATTRIBUTES via EnvResourceDetector
+    // We just need to add our custom attributes
+    let mut resource = Resource::builder()
         .with_service_name(service_name)
-        .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
-        .build();
+        .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")));
+
+    // Add cluster name if available
+    if let Ok(cluster_name) = std::env::var("CLUSTER_NAME") {
+        resource = resource.with_attribute(KeyValue::new("k8s.cluster.name", cluster_name));
+    }
+
+    let resource = resource.build();
 
     let effective_headers = collect_headers(headers);
 
@@ -397,17 +406,22 @@ fn configure_otel(
     }
 
     if metrics {
+        // Configure cumulative temporality for DataDog and Signoz compatibility
+        // Cumulative temporality sends monotonically increasing counter values
+        // DataDog calculates deltas server-side and handles .as_rate() more consistently
         let exporter = match proto {
             OtelProto::Grpc => {
-                let builder = opentelemetry_otlp::MetricExporter::builder().with_tonic();
+                let builder = opentelemetry_otlp::MetricExporter::builder()
+                    .with_tonic()
+                    .with_temporality(Temporality::Cumulative);
                 configure_grpc_builder(builder, endpoint, &effective_headers)?.build()?
             }
-            OtelProto::Http => configure_http_builder(
-                opentelemetry_otlp::MetricExporter::builder().with_http(),
-                endpoint,
-                &effective_headers,
-            )?
-            .build()?,
+            OtelProto::Http => {
+                let builder = opentelemetry_otlp::MetricExporter::builder()
+                    .with_http()
+                    .with_temporality(Temporality::Cumulative);
+                configure_http_builder(builder, endpoint, &effective_headers)?.build()?
+            }
         };
 
         let interval_secs = metrics_interval_secs.max(1) as u64;

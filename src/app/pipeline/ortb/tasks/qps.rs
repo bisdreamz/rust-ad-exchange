@@ -22,25 +22,28 @@ impl QpslimiterTask {
     pub fn new(bidder_manager: &BidderManager) -> Self {
         let mut endpoints_limiters = HashMap::new();
 
-        bidder_manager.bidders_endpoints().iter().for_each(|(_, endpoints)| {
-            for endpoint in endpoints {
-                if !endpoint.enabled {
-                    continue;
+        bidder_manager
+            .bidders_endpoints()
+            .iter()
+            .for_each(|(_, endpoints)| {
+                for endpoint in endpoints {
+                    if !endpoint.enabled {
+                        continue;
+                    }
+
+                    let rl = if endpoint.qps < 1 {
+                        debug!("Endpoint {} QPS limit: None", endpoint.name);
+                        None
+                    } else {
+                        debug!("Endpoint {} QPS limit: {}", endpoint.name, endpoint.qps);
+                        Some(RateLimiter::direct(Quota::per_second(
+                            NonZeroU32::new(endpoint.qps as u32).unwrap(),
+                        )))
+                    };
+
+                    endpoints_limiters.insert(endpoint.name.clone(), rl);
                 }
-
-                let rl = if endpoint.qps < 1 {
-                    debug!("Endpoint {} QPS limit: None", endpoint.name);
-                    None
-                } else {
-                    debug!("Endpoint {} QPS limit: {}", endpoint.name, endpoint.qps);
-                    Some(RateLimiter::direct(Quota::per_second(
-                        NonZeroU32::new(endpoint.qps as u32).unwrap(),
-                    )))
-                };
-
-                endpoints_limiters.insert(endpoint.name.clone(), rl);
-            }
-        });
+            });
 
         Self {
             endpoints: endpoints_limiters,

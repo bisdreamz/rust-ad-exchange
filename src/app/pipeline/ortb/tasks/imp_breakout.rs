@@ -273,13 +273,19 @@ mod tests {
             .build()
             .unwrap();
 
-        let context = AuctionContext::new("/test".to_string(), "pub123".to_string(), original_req);
+        let context = AuctionContext::new(
+            "/test".to_string(),
+            "pub123".to_string(),
+            original_req,
+            None,
+        );
 
         let endpoint = create_test_endpoint();
         let callout_req = context.req.read().clone();
 
         let mut bidder_context = BidderContext {
             bidder: Arc::new(Bidder {
+                id: "test_bidder_id".to_string(),
                 name: "test_bidder".to_string(),
                 gzip: false,
                 multi_imp: false,

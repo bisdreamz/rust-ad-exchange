@@ -1,0 +1,55 @@
+### Test bid request Site - Json Uncompressed pub1
+POST http://localhost/br/json/pub_1
+Content-Type: application/json
+
+{
+  "id": "BIDREQUEST_ID_123",
+  "imp": [
+    {
+      "id": "IMPRESSION_ID_456",
+      "banner": {
+        "w": 300,
+        "h": 250,
+        "format": [
+          { "w": 300, "h": 250 },
+          { "w": 300, "h": 600 }
+        ]
+      },
+      "bidfloor": 0.50,
+      "bidfloorcur": "USD",
+      "secure": 1
+    }
+  ],
+  "site": {
+    "id": "SITE_ID_789",
+    "name": "Example News Site",
+    "domain": "examplenews.com",
+    "page": "https://www.examplenews.com/articles/latest-story",
+    "publisher": {
+      "id": "PUBLISHER_ID_101",
+      "name": "News Corp"
+    },
+    "content": {
+      "language": "en",
+      "cat": ["IAB1-1", "IAB2-2"]
+    }
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "ip": "162.228.120.212",
+    "geo": {
+      "lat": 34.0522,
+      "lon": -118.2437,
+      "country": "USA",
+      "city": "Los Angeles"
+    },
+    "os": "Windows",
+    "osv": "10",
+    "devicetype": 2
+  },
+  "user": {
+    "id": "USER_ID_ABC",
+    "buyeruid": "BUYER_SPECIFIC_USER_ID_XYZ"
+  },
+  "tmax": 150
+}

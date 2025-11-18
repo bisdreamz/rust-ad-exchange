@@ -1,7 +1,7 @@
+use crate::core::models::publisher::Publisher;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use strum::{AsRefStr, Display, EnumString};
-use crate::core::models::publisher::Publisher;
 
 /// Represents the response action for how we should
 /// respond to an incoming sync url request
@@ -31,7 +31,7 @@ pub struct SyncOutContext {
     pub cookies: HashMap<String, String>,
     /// The local user ID a.k.a our exchange ID for this user,
     /// as extracted from the cookies
-    pub local_id: OnceLock<String>,
+    pub local_uid: OnceLock<String>,
     /// The final ['SyncResponse'] which we should
     /// send as the http response
     pub response: OnceLock<SyncResponse>,

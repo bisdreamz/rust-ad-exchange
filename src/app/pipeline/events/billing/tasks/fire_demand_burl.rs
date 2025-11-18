@@ -1,9 +1,9 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use tracing::{debug, warn, Instrument, Span};
+use tracing::{Instrument, Span, debug, warn};
 
 /// Responsible for firing the demand billing events. This task
 /// expects them to be present and will bail if missing. also
@@ -17,10 +17,12 @@ impl FireDemandBurlTask {
         let notice_urls = match context.demand_urls.get() {
             Some(urls) => urls,
             None => {
-                warn!("No notice URLs on event context when firing BURL task. This should not happen!");
+                warn!(
+                    "No notice URLs on event context when firing BURL task. This should not happen!"
+                );
 
                 bail!("No notice URLs!");
-            },
+            }
         };
 
         if notice_urls.burl.is_none() {
@@ -36,7 +38,7 @@ impl FireDemandBurlTask {
             Ok(_) => {
                 debug!("Successfully fetched burl fire: {}", burl);
                 span.record("success", true);
-            },
+            }
             Err(e) => {
                 span.record("success", false);
                 span.record("error", e.to_string());

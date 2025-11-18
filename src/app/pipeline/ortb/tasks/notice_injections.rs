@@ -1,18 +1,18 @@
-use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
 use crate::core::demand::notifications::{DemandNotificationsCache, NoticeUrls};
 use crate::core::events;
 use crate::core::events::{billing, macros};
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::bid_response::SeatBid;
 use rtb::common::DataUrl;
-use rtb::utils::adm::process_replace_adm;
-use rtb::{child_span_info, BidRequest, BidResponse};
-use std::sync::Arc;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::{debug, trace, warn, Instrument};
+use rtb::utils::adm::process_replace_adm;
+use rtb::{BidRequest, BidResponse, child_span_info};
+use std::sync::Arc;
+use tracing::{Instrument, debug, trace, warn};
 
 /// Convenience method for retrieving the burl from the context.notifications.burl
 /// base ['DataUrl'] and cloning it so it may be used in the adm, burl, or wherever.
@@ -20,7 +20,7 @@ use tracing::{debug, trace, warn, Instrument};
 fn get_ctx_burl_clone(bid_context: &mut BidContext) -> Result<DataUrl, Error> {
     match bid_context.notifications.billing.get() {
         Some(beacon_url) => Ok(beacon_url.clone_unfinalized()),
-        None => bail!("No billing url found on context for bid! Blocking bid!")
+        None => bail!("No billing url found on context for bid! Blocking bid!"),
     }
 }
 
@@ -43,17 +43,14 @@ fn inject_adm_beacon(bid_context: &mut BidContext) -> Result<(), Error> {
     let mut beacon_url = get_ctx_burl_clone(bid_context)?;
 
     if let Err(e) = beacon_url.add_string(billing::FIELD_EVENT_SOURCE, "adm") {
-        bail!(
-            "Failed to add adm source param to beacon url: {}",
-            e
-        );
+        bail!("Failed to add adm source param to beacon url: {}", e);
     }
 
     beacon_url.finalize();
 
     let beacon_url_string = match beacon_url.url(true) {
         Ok(url) => url,
-        Err(e) => bail!("Failed to finalize beacon billing url: {}", e)
+        Err(e) => bail!("Failed to finalize beacon billing url: {}", e),
     };
 
     match events::injectors::adm::inject_adm_beacon(beacon_url_string, &mut bid_context.bid) {
@@ -86,7 +83,7 @@ fn inject_swap_burl(
 
     let final_burl = match beacon_url.url(true) {
         Ok(url) => url,
-        Err(e) => bail!("Failed to inject swap bid burl: {}", e)
+        Err(e) => bail!("Failed to inject swap bid burl: {}", e),
     };
 
     // get original demand burl
@@ -126,8 +123,13 @@ impl NotificationsUrlInjectionTask {
         Self { demand_url_cache }
     }
 
-    fn inject_bid_event_handlers(&self, req: &BidRequest, res: &BidResponse, seat: &SeatBid, bid_context: &mut BidContext)
-        -> Result<(), Error>{
+    fn inject_bid_event_handlers(
+        &self,
+        req: &BidRequest,
+        res: &BidResponse,
+        seat: &SeatBid,
+        bid_context: &mut BidContext,
+    ) -> Result<(), Error> {
         // Finalize urls since they can no longer be modified, ensure safety
         if let Some(base_url) = bid_context.notifications.billing.get_mut() {
             base_url.finalize();
@@ -188,7 +190,7 @@ impl NotificationsUrlInjectionTask {
                             rtb::spec::openrtb::nobidreason::TECHNICAL_ERROR,
                             e.to_string(),
                         ));
-                    },
+                    }
                 }
             }
         }

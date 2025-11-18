@@ -8,6 +8,7 @@ use rtb::bid_response::{Bid, SeatBid};
 use rtb::common::DataUrl;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
@@ -154,6 +155,15 @@ pub struct BidderContext {
     pub callouts: Vec<BidderCallout>,
 }
 
+#[derive(Debug, Default)]
+pub struct IdentityContext {
+    /// Our web cookie id for this user, which has been extracted
+    /// from cookie or provided to us in buyeruid from seller. If
+    /// this is present, req.user.id will now be set to this val
+    pub local_uid: OnceLock<String>,
+    // later, ramp ids or.. whatever
+}
+
 /// Top level auction context object which carries all context required
 /// to fullfill a request pipeline
 ///
@@ -169,6 +179,9 @@ pub struct BidderContext {
 pub struct AuctionContext {
     /// Raw pubid provided from the http path, pre-validation
     pub pubid: String,
+    /// Cookies present on inbound request, if any
+    pub cookies: Option<HashMap<String, String>>,
+    pub identity: OnceLock<IdentityContext>,
     /// The ['Publisher'] object if the pubid value has been recognized
     pub publisher: OnceLock<Arc<Publisher>>,
     /// Locally assigned but globally unique identifier for this auction
@@ -181,15 +194,20 @@ pub struct AuctionContext {
 }
 
 impl AuctionContext {
-    pub fn new(source: String, pubid: String, req: BidRequest) -> AuctionContext {
+    pub fn new(
+        source: String,
+        pubid: String,
+        req: BidRequest,
+        cookies: Option<HashMap<String, String>>,
+    ) -> AuctionContext {
         AuctionContext {
             pubid,
-            publisher: OnceLock::new(),
+            cookies,
             event_id: Uuid::new_v4().to_string(),
             source,
             req: RwLock::new(req),
-            res: OnceLock::new(),
             bidders: tokio::sync::Mutex::new(Vec::new()),
+            ..Default::default()
         }
     }
 }

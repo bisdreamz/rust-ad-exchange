@@ -1,4 +1,3 @@
-
 /// Apply publisher margin to the gross bid price received from the
 /// demand partner.
 ///

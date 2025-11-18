@@ -1,10 +1,10 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use anyhow::{bail, Error};
+use crate::core::demand::takerate;
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use tracing::{debug, Instrument};
-use crate::core::demand::takerate;
+use tracing::{Instrument, debug};
 
 pub const MIN_FLOOR: f64 = 0.25;
 
@@ -21,13 +21,19 @@ impl FloorsMarkupTask {
 
         for imp in req.imp.iter_mut() {
             if imp.bidfloor < MIN_FLOOR {
-                debug!("Applying min floor to imp &{} -> &{}", imp.bidfloor, MIN_FLOOR);
+                debug!(
+                    "Applying min floor to imp &{} -> &{}",
+                    imp.bidfloor, MIN_FLOOR
+                );
                 imp.bidfloor = MIN_FLOOR;
                 continue;
             }
 
             let new_imp_floor = takerate::markup_floor(imp.bidfloor, publisher.margin);
-            debug!("Marking up imp floor from ${} -> ${}", imp.bidfloor, new_imp_floor);
+            debug!(
+                "Marking up imp floor from ${} -> ${}",
+                imp.bidfloor, new_imp_floor
+            );
 
             imp.bidfloor = new_imp_floor;
 
@@ -42,8 +48,10 @@ impl FloorsMarkupTask {
                 let min_deal_floor = takerate::markup_floor(deal.bidfloor, publisher.margin);
                 let new_deal_floor = min_deal_floor.max(new_imp_floor);
 
-                debug!("Bringing deal floor ${} up to new imp floor ${}",
-                        deal.bidfloor, new_deal_floor);
+                debug!(
+                    "Bringing deal floor ${} up to new imp floor ${}",
+                    deal.bidfloor, new_deal_floor
+                );
 
                 deal.bidfloor = new_deal_floor;
             }

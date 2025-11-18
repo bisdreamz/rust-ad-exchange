@@ -6,7 +6,7 @@ use std::ops::{Div, Mul};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::Instant;
-use tracing::{ warn};
+use tracing::warn;
 
 fn calculate_effective_qps(duration_ms: u64, requests: u64) -> u32 {
     let multiplier = 1000.0.div(duration_ms as f32);

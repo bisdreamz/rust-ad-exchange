@@ -43,8 +43,12 @@ fn task_cycle_threshold(
         }
     };
 
-    trace!("Tick duration {}ms requests {} state: {:?}",
-        tick.duration().as_millis(), tick.total_requests(), &state);
+    trace!(
+        "Tick duration {}ms requests {} state: {:?}",
+        tick.duration().as_millis(),
+        tick.total_requests(),
+        &state
+    );
 
     state_dest.store(Arc::new(state));
 }

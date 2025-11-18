@@ -1,0 +1,2 @@
+### User sync out (our iframe invoked)
+GET http://localhost:80/sync/out/pub_1
