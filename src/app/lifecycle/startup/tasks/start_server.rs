@@ -194,15 +194,8 @@ async fn sync_out_handler(
     let cookie_param_key = usersync::constants::CONST_REX_COOKIE_ID_PARAM;
 
     if let Err(e) = pipeline.run(&context).await {
-        debug!("Sync-out pipeline aborted: {}", e);
-        let mut response = HttpResponse::BadRequest();
-        if let Some(uid) = context.local_uid.get() {
-            let cookie = Cookie::build(cookie_param_key, uid.clone())
-                .path("/")
-                .finish();
-            response.cookie(cookie);
-        }
-        return response.finish();
+        // this isnt an error in and of its self, so just log reason
+        debug!("Sync-out pipeline aborted early: {}", e);
     }
 
     if context.response.get().is_none() {

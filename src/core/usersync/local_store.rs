@@ -31,7 +31,7 @@ impl SyncStore for LocalStore {
 
         let old_value = map_entry.get(partner_id).cloned();
 
-        map_entry.insert(local_id.clone(), SyncEntry::new(remote_id));
+        map_entry.insert(partner_id.clone(), SyncEntry::new(remote_id));
 
         self.cache.insert(local_id.clone(), map_entry);
 

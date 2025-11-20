@@ -4,12 +4,13 @@ use crate::core::models::publisher::Publisher;
 use crate::core::usersync::SyncStore;
 use anyhow::{Error, anyhow};
 use async_trait::async_trait;
+use log::log_enabled;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use std::sync::{Arc, LazyLock};
-use tracing::{Instrument, Span, debug, warn};
+use tracing::{Instrument, Span, debug, trace, warn};
 
 static COUNTER_BUYERUID_MATCHES: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex:demand:syncing")
@@ -55,6 +56,10 @@ impl IdentityDemandTask {
 
         if !span.is_disabled() {
             span.record("buyer_uids", format!("{:?}", buyer_uids_map));
+        }
+
+        if log_enabled!(log::Level::Trace) {
+            trace!("Buyeruids map: {:?}", buyer_uids_map);
         }
 
         debug!(

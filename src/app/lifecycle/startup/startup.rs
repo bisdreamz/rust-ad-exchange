@@ -42,11 +42,11 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .with_async(Box::new(IpRiskLoadTask))
         .with_async(Box::new(DeviceLookupLoadTask))
         .with_blocking(Box::new(DemandUrlCacheStartTask::new(cfg_manager.clone())))
-        .with_blocking(Box::new(BuildRtbPipelineTask))
-        .with_blocking(Box::new(BuildEventPipelineTask))
         .with_async(Box::new(SyncStoreInitTask::new(Duration::from_hours(
             24 * 7,
         ))))
+        .with_blocking(Box::new(BuildRtbPipelineTask))
+        .with_blocking(Box::new(BuildEventPipelineTask))
         .with_blocking(Box::new(BuildSyncPipelinesTask))
         .with_async(Box::new(StartServerTask))
         .build()
