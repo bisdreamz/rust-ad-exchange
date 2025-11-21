@@ -190,7 +190,7 @@ impl TreeShaper {
         }
     }
 
-    fn extract_features(&self, req: &BidRequest, bid: &Option<&Bid>) -> Vec<Feature> {
+    fn extract_features(&self, req: &BidRequest, bid: Option<&Bid>) -> Vec<Feature> {
         self.features
             .iter()
             .map(|f| utils::extract_shaping_feature(f, req, bid))
@@ -198,7 +198,7 @@ impl TreeShaper {
     }
 
     pub fn passes_shaping(&self, req: &BidRequest) -> Result<ShapingResult, Error> {
-        let req_features = self.extract_features(req, &None);
+        let req_features = self.extract_features(req, None);
         let prediction_opt = match self.tree.predict(&req_features) {
             Ok(prediction_opt) => prediction_opt,
             Err(e) => {
@@ -361,7 +361,7 @@ impl TreeShaper {
     }
 
     pub fn record_auction(&self, req: &BidRequest) -> Result<(), Error> {
-        let features = self.extract_features(req, &None);
+        let features = self.extract_features(req, None);
 
         self.tree
             .train(
@@ -379,7 +379,7 @@ impl TreeShaper {
     }
 
     pub fn record_bid(&self, req: &BidRequest, bid: &Bid) -> Result<String, Error> {
-        let features = self.extract_features(req, &Some(bid));
+        let features = self.extract_features(req, Some(bid));
 
         self.tree
             .train(

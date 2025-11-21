@@ -5,6 +5,7 @@ use rtb::bid_request::{Banner, DistributionchannelOneof};
 use rtb::bid_response::Bid;
 use rtb::utils::adm::AdFormat;
 use smallvec::SmallVec;
+use tracing::{debug, trace};
 
 pub const MISSING_STR: &str = "*";
 pub const MISSING_U32: u32 = 0;
@@ -145,6 +146,8 @@ fn format_ad_size_format(format: AdFormat, size: Option<(u32, u32)>) -> String {
     }
 }
 
+/// Generate an entry for each available ad size to ensure they
+/// are all properly recorded
 fn add_size_formats_banner(banner: &Banner, dest: &mut SmallVec<[String; 8]>) {
     let pw = banner.w;
     let ph = banner.h;
@@ -186,6 +189,40 @@ fn extract_buyer_user_matched(req: &BidRequest) -> Feature {
     Feature::boolean(ShapingFeature::UserMatched.as_ref(), matched)
 }
 
+/// Records ad format size feature specific to the bid, so we dont
+/// cross contaminate *available* request features such as
+/// multiple sizes on a request, with the actual size details
+/// being bid on by the demand partner. This is important to ensure
+/// we dont misattribute positive activity like bidding on other
+/// ad segments that had overlap on available sizes but no
+/// real bidding actiivty
+fn extract_feature_ad_format_sizes_bid(req: &BidRequest, bid: &Bid) -> Feature {
+    let mut values = SmallVec::<[String; 8]>::new();
+
+    if let Some(format) = rtb::utils::detect_ad_format(&bid)
+        && bid.w > 0
+        && bid.h > 0
+    {
+        let str = format_ad_size_format(format, Some((bid.w as u32, bid.h as u32)));
+        trace!(
+            "Have bid details, recording specific shaping details: {}",
+            str
+        );
+
+        add_if_not_exist(&str, &mut values);
+
+        return Feature::multi_string(ShapingFeature::AdSizeFormat.as_ref(), values);
+    }
+
+    debug!("Bid with 0 w/h (audio?) or failed to extract bid format, defaulting to req features");
+
+    extract_feature_ad_format_sizes(req)
+}
+
+/// Records the features of ad format_size for the given request.
+/// This produces combinations of every available ad format and
+/// size (from w/h and format) to ensure we properly record the
+/// available features on a request.
 fn extract_feature_ad_format_sizes(req: &BidRequest) -> Feature {
     let mut values = SmallVec::<[String; 8]>::new();
 
@@ -219,7 +256,7 @@ fn extract_feature_ad_format_sizes(req: &BidRequest) -> Feature {
 pub fn extract_shaping_feature(
     feature: &ShapingFeature,
     req: &BidRequest,
-    _bid: &Option<&Bid>,
+    bid_opt: Option<&Bid>,
 ) -> Feature {
     match feature {
         ShapingFeature::PubId => extract_feature_pubid(req),
@@ -228,7 +265,10 @@ pub fn extract_shaping_feature(
         ShapingFeature::DeviceOs => extract_feature_device_os(req),
         ShapingFeature::DeviceType => extract_feature_device_type(req),
         ShapingFeature::DeviceConType => extract_feature_device_con_type(req),
-        ShapingFeature::AdSizeFormat => extract_feature_ad_format_sizes(req),
+        ShapingFeature::AdSizeFormat => match bid_opt {
+            Some(bid) => extract_feature_ad_format_sizes_bid(req, bid),
+            None => extract_feature_ad_format_sizes(req),
+        },
         ShapingFeature::ZoneId => extract_feature_tagid(req),
         ShapingFeature::UserMatched => extract_buyer_user_matched(req),
     }
