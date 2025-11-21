@@ -26,9 +26,9 @@ mod imp_breakout;
 
 pub use imp_breakout::MultiImpBreakoutTask;
 
-mod notice_injections;
+mod notice_injections_adm_macros;
 
-pub use notice_injections::NotificationsUrlInjectionTask;
+pub use notice_injections_adm_macros::NotificationsUrlInjectionTask;
 mod test_bidder;
 
 pub use test_bidder::TestBidderTask;
