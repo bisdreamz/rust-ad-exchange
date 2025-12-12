@@ -406,20 +406,22 @@ fn configure_otel(
     }
 
     if metrics {
-        // Configure cumulative temporality for DataDog and Signoz compatibility
-        // Cumulative temporality sends monotonically increasing counter values
-        // DataDog calculates deltas server-side and handles .as_rate() more consistently
+        // Configure delta temporality for DataDog OTLP metrics intake
+        // DataDog's OTLP endpoint requires delta temporality for monotonic counters
+        // Each export sends the delta/increment since the last export
+        // https://docs.datadoghq.com/opentelemetry/guide/otlp_delta_temporality/
+        log::info!("OTEL metrics exporter configured with DELTA temporality");
         let exporter = match proto {
             OtelProto::Grpc => {
                 let builder = opentelemetry_otlp::MetricExporter::builder()
                     .with_tonic()
-                    .with_temporality(Temporality::Cumulative);
+                    .with_temporality(Temporality::Delta);
                 configure_grpc_builder(builder, endpoint, &effective_headers)?.build()?
             }
             OtelProto::Http => {
                 let builder = opentelemetry_otlp::MetricExporter::builder()
                     .with_http()
-                    .with_temporality(Temporality::Cumulative);
+                    .with_temporality(Temporality::Delta);
                 configure_http_builder(builder, endpoint, &effective_headers)?.build()?
             }
         };
@@ -433,6 +435,7 @@ fn configure_otel(
             .with_resource(resource)
             .with_reader(reader)
             .build();
+        log::info!("✓ Rex metrics using DELTA temporality for DataDog OTLP");
 
         meter = Some(provider);
     }

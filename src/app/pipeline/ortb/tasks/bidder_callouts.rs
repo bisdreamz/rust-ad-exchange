@@ -226,6 +226,10 @@ fn record_counter_metrics(context: &AuctionContext, bidders: &Vec<BidderContext>
 
     for bidder_context in bidders {
         for callout in &bidder_context.callouts {
+            if callout.skip_reason.get().is_some() {
+                continue;
+            }
+
             let mut attrs = vec![
                 KeyValue::new("pub_id", publisher.id.clone()),
                 KeyValue::new("pub_name", publisher.name.clone()),
@@ -313,6 +317,10 @@ impl BidderCalloutsTask {
     fn record_timeouts(&self, bidders: &Vec<BidderContext>) {
         for bidder in bidders.iter() {
             for callout in bidder.callouts.iter() {
+                if callout.skip_reason.get().is_some() {
+                    continue;
+                }
+
                 if callout.response.get().is_none() {
                     let br = BidderResponse {
                         latency: Duration::from_secs(1),
@@ -341,7 +349,7 @@ impl BidderCalloutsTask {
     async fn send_all(&self, context: &AuctionContext) -> Result<(), Error> {
         let bidders = context.bidders.lock().await;
 
-        debug!("Have {} bidders for callouts", bidders.len());
+        debug!("Have {} potential bidders for callouts", bidders.len());
 
         let futs = self.send_bidder_callouts(&bidders);
         if futs.is_empty() {
