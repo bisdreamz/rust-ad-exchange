@@ -1,5 +1,5 @@
 use crate::core::shaping::tree::serializers;
-use logictree::PredictionHandler;
+use logictree::{Feature, PredictionHandler};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::ops::{Div, Mul};
@@ -133,7 +133,7 @@ impl RtbPredictionHandler {
 }
 
 impl PredictionHandler<RtbTrainingInput, RtbPredictionOutput> for RtbPredictionHandler {
-    fn train(&self, input: &RtbTrainingInput) -> () {
+    fn train(&self, input: &RtbTrainingInput, _next_feature: Option<&Feature>) -> () {
         self.last_active
             .store(rtb::common::utils::epoch_timestamp(), Ordering::Relaxed);
 
