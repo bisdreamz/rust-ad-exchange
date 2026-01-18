@@ -47,7 +47,7 @@ pub enum ClusterConfig {
     Fixed(usize),
     /// Auto discovery of cluster peers & updates
     /// via k8s api
-    K8s
+    K8s,
 }
 
 impl Default for ClusterConfig {

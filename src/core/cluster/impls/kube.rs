@@ -1,14 +1,14 @@
-use std::sync::{Arc, RwLock};
-use kube_discovery::{KubeDiscovery, PeerEvent};
-use anyhow::Result;
-use tracing::{error, info, trace};
 use crate::core::cluster::ClusterDiscovery;
+use anyhow::Result;
+use kube_discovery::{KubeDiscovery, PeerEvent};
+use std::sync::{Arc, RwLock};
+use tracing::{error, info, trace};
 
 /// Discovers peers via k8s api
 /// to monitor cluster sizing
 pub struct KubeClusterDiscovery {
     kd: KubeDiscovery,
-    callbacks: Arc<RwLock<Vec<Box<dyn Fn(usize) + Send + Sync>>>>
+    callbacks: Arc<RwLock<Vec<Box<dyn Fn(usize) + Send + Sync>>>>,
 }
 
 impl KubeClusterDiscovery {
@@ -24,7 +24,10 @@ impl KubeClusterDiscovery {
             Some(move |peer_event: PeerEvent| {
                 let new_size = match &peer_event {
                     PeerEvent::Added { peer, total } => {
-                        info!("New peer discovered: {}, cluster size: {}", peer.hostname, total);
+                        info!(
+                            "New peer discovered: {}, cluster size: {}",
+                            peer.hostname, total
+                        );
                         *total
                     }
                     PeerEvent::Removed { peer, total } => {
@@ -41,7 +44,8 @@ impl KubeClusterDiscovery {
                     }
                 }
             }),
-        ).await?;
+        )
+        .await?;
 
         Ok(Self { kd, callbacks })
     }

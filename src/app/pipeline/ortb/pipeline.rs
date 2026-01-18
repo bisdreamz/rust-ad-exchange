@@ -3,9 +3,9 @@ use crate::app::pipeline::ortb::tasks::{
     BidSettlementTask, FloorsMarkupTask, IdentityDemandTask, NotificationsUrlCreationTask,
     NotificationsUrlInjectionTask, RecordShapingTrainingTask,
 };
-use crate::app::pipeline::ortb::{tasks, AuctionContext};
+use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use pipeline::{Pipeline, PipelineBuilder};
 
 /// Builds the pipeline for which an openrtb request flows through for auction handling.
@@ -42,7 +42,9 @@ pub fn build_auction_pipeline(
         .get()
         .ok_or_else(|| anyhow::anyhow!("Demand url cache not set"))?;
 
-    let cluster_manager = context.cluster_manager.get()
+    let cluster_manager = context
+        .cluster_manager
+        .get()
         .ok_or(anyhow!("Cluster manager not set"))?;
 
     let bidder_manager = match context.bidder_manager.get() {
@@ -92,8 +94,10 @@ pub fn build_auction_pipeline(
         .with_async(Box::new(tasks::TrafficShapingTask::new(
             shaping_manager.clone(),
         )))
-        .with_async(Box::new(tasks::QpslimiterTask::new(bidder_manager.clone(),
-                                                        cluster_manager.clone())))
+        .with_async(Box::new(tasks::QpslimiterTask::new(
+            bidder_manager.clone(),
+            cluster_manager.clone(),
+        )))
         .with_async(Box::new(tasks::BidderCalloutsTask::new(demand_client)))
         .with_async(Box::new(tasks::TestBidderTask))
         .with_async(Box::new(tasks::BidMarginTask))

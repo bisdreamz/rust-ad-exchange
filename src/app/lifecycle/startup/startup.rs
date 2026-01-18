@@ -19,7 +19,7 @@ use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info_span, Span};
+use tracing::{Span, info_span};
 
 /// Builds the graceful ordering of startup tasks required for a successful startup.
 /// Configures logging, builds the request pipelines, all that good stuff

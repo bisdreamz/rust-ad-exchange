@@ -1,4 +1,5 @@
 pub mod bidders_load;
+pub mod cluster;
 pub mod config_load;
 pub mod demand_url_cache;
 pub mod device_load;
@@ -11,4 +12,3 @@ pub mod shapers_load;
 pub mod start_server;
 pub mod sync_pipelines;
 pub mod sync_store_init;
-pub mod cluster;

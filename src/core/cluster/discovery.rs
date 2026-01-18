@@ -4,7 +4,6 @@ use async_trait::async_trait;
 /// in a cluster, e.g. by bare metal or kubernetes
 #[async_trait]
 pub trait ClusterDiscovery: Send + Sync {
-
     /// Returns the size (total count) of all healthy
     /// targets within the cluster, including self.
     /// Not async as cluster
@@ -19,5 +18,4 @@ pub trait ClusterDiscovery: Send + Sync {
     /// Registered callback receives a param
     /// of the update cluster size
     fn on_change(&self, cb: Box<dyn Fn(usize) + Send + Sync>);
-
 }
