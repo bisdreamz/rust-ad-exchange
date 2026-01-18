@@ -2,6 +2,7 @@ use crate::app::lifecycle::context::StartupContext;
 use crate::app::lifecycle::startup::tasks::config_load::ConfigLoadTask;
 use crate::app::span::WrappedPipelineTask;
 use crate::app::startup::tasks::bidders_load::BidderManagerLoadTask;
+use crate::app::startup::tasks::cluster::ClusterDiscoveryTask;
 use crate::app::startup::tasks::demand_url_cache::DemandUrlCacheStartTask;
 use crate::app::startup::tasks::device_load::DeviceLookupLoadTask;
 use crate::app::startup::tasks::event_pipeline::BuildEventPipelineTask;
@@ -18,7 +19,7 @@ use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{Span, info_span};
+use tracing::{info_span, Span};
 
 /// Builds the graceful ordering of startup tasks required for a successful startup.
 /// Configures logging, builds the request pipelines, all that good stuff
@@ -36,6 +37,7 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
     // NOTE - Tasks here can use the #[instrument] attribute without concern since we want to
     // log them during startup/shutdown and dont need to filter those
     let start_pipeline = PipelineBuilder::new()
+        .with_async(Box::new(ClusterDiscoveryTask))
         .with_blocking(Box::new(BidderManagerLoadTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(ShapersManagerLoadTask))
         .with_blocking(Box::new(PubsManagerLoadTask::new(cfg_manager.clone())))

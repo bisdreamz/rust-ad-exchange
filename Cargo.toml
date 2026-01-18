@@ -11,6 +11,7 @@ otel-http = ["opentelemetry-otlp/http-proto"]
 rtb-runtime = { path = "../rtb-runtime", features = ["actix-web", "tracing", "simd-json"] }
 logictree = { path = "../logictree" }
 pipeline = {  path = "../pipeline" }
+kube-discovery = { path = "../kube-discovery" }
 actix-web = "4.11.0"
 serde = "1.0.228"
 serde_json = "1.0.145"

@@ -1,8 +1,10 @@
-use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
+use crate::app::pipeline::ortb::AuctionContext;
+use crate::core::cluster::ClusterDiscovery;
 use crate::core::managers::BidderManager;
 use crate::core::spec::nobidreasons;
-use anyhow::{Error, anyhow, bail};
+use anyhow::{anyhow, bail, Error};
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use pipeline::AsyncTask;
@@ -10,17 +12,45 @@ use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use tracing::{Instrument, Span, debug, trace, warn};
+use std::sync::Arc;
+use tracing::{debug, trace, warn, Instrument, Span};
 
-/// Responsible for enforcing QPS limits per emdpoint,
+/// Responsible for enforcing QPS limits per endpoint,
 /// for callouts which do not already have a skip_reason assigned
 pub struct QpslimiterTask {
-    endpoints: HashMap<String, Option<DefaultDirectRateLimiter>>,
+    endpoints: Arc<ArcSwap<HashMap<String, Option<DefaultDirectRateLimiter>>>>
 }
 
 impl QpslimiterTask {
-    pub fn new(bidder_manager: &BidderManager) -> Self {
+    pub fn new(bidder_manager: Arc<BidderManager>, cluster: Arc<dyn ClusterDiscovery>) -> Self {
+        let endpoint_limiters = Self::rebuild_limiters_map(
+            &bidder_manager,
+            cluster.cluster_size()
+        );
+
+        let endpoints = Arc::new(ArcSwap::from_pointee(endpoint_limiters));
+
+        let endpoints_clone = endpoints.clone();
+        let bidder_manager_clone = bidder_manager.clone();
+
+        cluster.on_change(Box::new(move |cluster_sz| {
+            debug!("Cluster size changed to {}, rebuilding QPS limiters map", cluster_sz);
+
+            let new_limiters = QpslimiterTask::rebuild_limiters_map(
+                &bidder_manager_clone,
+                cluster_sz,
+            );
+
+            endpoints_clone.store(Arc::new(new_limiters));
+        }));
+
+        Self { endpoints }
+    }
+
+    fn rebuild_limiters_map(bidder_manager: &BidderManager, cluster_sz: usize) -> HashMap<String, Option<DefaultDirectRateLimiter>> {
         let mut endpoints_limiters = HashMap::new();
+
+        assert!(cluster_sz > 0, "Cluster cannot be empty!");
 
         bidder_manager
             .bidders_endpoints()
@@ -35,9 +65,12 @@ impl QpslimiterTask {
                         debug!("Endpoint {} QPS limit: None", endpoint.name);
                         None
                     } else {
-                        debug!("Endpoint {} QPS limit: {}", endpoint.name, endpoint.qps);
+                        let local_qps = (endpoint.qps / cluster_sz).max(1);
+
+                        debug!("Endpoint {} QPS limit: {} ({} effective locally)",
+                            endpoint.name, endpoint.qps, local_qps);
                         Some(RateLimiter::direct(Quota::per_second(
-                            NonZeroU32::new(endpoint.qps as u32).unwrap(),
+                            NonZeroU32::new(local_qps as u32).unwrap(),
                         )))
                     };
 
@@ -45,9 +78,7 @@ impl QpslimiterTask {
                 }
             });
 
-        Self {
-            endpoints: endpoints_limiters,
-        }
+        endpoints_limiters
     }
 
     fn should_block(&self, callout: &BidderCallout) -> bool {
@@ -58,7 +89,9 @@ impl QpslimiterTask {
         )
         .entered();
 
-        let rl_opt = match self.endpoints.get(&callout.endpoint.name) {
+        let endpoints = self.endpoints.load();
+
+        let rl_opt = match endpoints.get(&callout.endpoint.name) {
             Some(rl_opt) => rl_opt,
             None => {
                 warn!(

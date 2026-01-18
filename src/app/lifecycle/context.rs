@@ -1,8 +1,9 @@
 use crate::app::config::RexConfig;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::syncing::r#in::context::SyncInContext;
 use crate::app::pipeline::syncing::out::context::SyncOutContext;
+use crate::app::pipeline::syncing::r#in::context::SyncInContext;
+use crate::core::cluster::ClusterDiscovery;
 use crate::core::demand::notifications::DemandNotificationsCache;
 use crate::core::enrichment::device::DeviceLookup;
 use crate::core::filters::bot::IpRiskFilter;
@@ -38,6 +39,8 @@ pub struct StartupContext {
     pub demand_url_cache: OnceLock<Arc<DemandNotificationsCache>>,
     /// The user sync store for partners which we host a match table
     pub sync_store: OnceLock<Arc<dyn SyncStore>>,
+    /// Responsible for observing cluster sizing changes
+    pub cluster_manager: OnceLock<Arc<dyn ClusterDiscovery>>,
 
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline

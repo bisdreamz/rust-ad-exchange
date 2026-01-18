@@ -40,6 +40,22 @@ pub struct EventConfig {
     pub ttl: Duration,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ClusterConfig {
+    /// Sets a fixed cluster size for manual testing
+    /// or bare metal deployment
+    Fixed(usize),
+    /// Auto discovery of cluster peers & updates
+    /// via k8s api
+    K8s
+}
+
+impl Default for ClusterConfig {
+    fn default() -> Self {
+        ClusterConfig::Fixed(1)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
     pub ssl: Option<TlsConfig>,
@@ -48,6 +64,8 @@ pub struct RexConfig {
     pub bidders: Vec<BidderConfig>,
     pub publishers: Vec<Publisher>,
     pub notifications: EventConfig,
+    #[serde(default)]
+    pub cluster: ClusterConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
     pub schain_limit: u32,

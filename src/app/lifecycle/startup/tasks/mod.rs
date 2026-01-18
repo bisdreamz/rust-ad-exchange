@@ -11,3 +11,4 @@ pub mod shapers_load;
 pub mod start_server;
 pub mod sync_pipelines;
 pub mod sync_store_init;
+pub mod cluster;

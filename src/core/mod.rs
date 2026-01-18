@@ -9,3 +9,4 @@ pub mod observability;
 pub mod shaping;
 pub mod spec;
 pub mod usersync;
+pub mod cluster;
