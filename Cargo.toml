@@ -12,7 +12,7 @@ rtb-runtime = { path = "../rtb-runtime", features = ["actix-web", "tracing", "si
 logictree = { path = "../logictree" }
 pipeline = {  path = "../pipeline" }
 kube-discovery = { path = "../kube-discovery" }
-actix-web = "4.11.0"
+actix-web = { version = "4.11.0", default-features = false, features = ["macros", "compress-gzip", "compress-zstd", "cookies"] }
 serde = "1.0.228"
 serde_json = "1.0.145"
 anyhow = "1.0.100"
@@ -24,7 +24,7 @@ rust-device-detector = { git = "https://github.com/simplecastapps/rust-device-de
 fast_uaparser = "2.0.1"
 moka = { version = "0.12.11", features = ["sync"] }
 ip_network_table = "0.2.0"
-reqwest = { version = "0.12.24", features = ["gzip", "deflate", "hickory-dns"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "http2", "gzip", "deflate", "hickory-dns"] }
 arc-swap = "1.7.1"
 ip_network = "0.4.1"
 tracing = { version = "0.1.41", features = ["async-await", "log"] }
@@ -53,6 +53,12 @@ smallvec = "1.15.1"
 mimalloc = "0.1.48"
 derivative = "2.2.0"
 humantime-serde = "1.1.1"
+
+[profile.release]
+debug = 0
+strip = true
+panic = "abort"
+codegen-units = 1
 
 [profile.profiling]
 inherits = "release"
