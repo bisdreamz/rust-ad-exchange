@@ -1,7 +1,7 @@
-mod bidders;
+mod demand;
 mod publishers;
 mod shapers;
 
-pub use bidders::*;
+pub use demand::*;
 pub use publishers::*;
 pub use shapers::*;

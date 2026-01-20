@@ -1,9 +1,9 @@
-use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
+use crate::app::pipeline::ortb::AuctionContext;
 use crate::core::cluster::ClusterDiscovery;
-use crate::core::managers::BidderManager;
+use crate::core::managers::DemandManager;
 use crate::core::spec::nobidreasons;
-use anyhow::{Error, anyhow, bail};
+use anyhow::{anyhow, bail, Error};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
@@ -13,7 +13,7 @@ use rtb::common::bidresponsestate::BidResponseState;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use tracing::{Instrument, Span, debug, trace, warn};
+use tracing::{debug, trace, warn, Instrument, Span};
 
 /// Responsible for enforcing QPS limits per endpoint,
 /// for callouts which do not already have a skip_reason assigned
@@ -22,7 +22,7 @@ pub struct QpslimiterTask {
 }
 
 impl QpslimiterTask {
-    pub fn new(bidder_manager: Arc<BidderManager>, cluster: Arc<dyn ClusterDiscovery>) -> Self {
+    pub fn new(bidder_manager: Arc<DemandManager>, cluster: Arc<dyn ClusterDiscovery>) -> Self {
         let endpoint_limiters = Self::rebuild_limiters_map(&bidder_manager, cluster.cluster_size());
 
         let endpoints = Arc::new(ArcSwap::from_pointee(endpoint_limiters));
@@ -46,7 +46,7 @@ impl QpslimiterTask {
     }
 
     fn rebuild_limiters_map(
-        bidder_manager: &BidderManager,
+        bidder_manager: &DemandManager,
         cluster_sz: usize,
     ) -> HashMap<String, Option<DefaultDirectRateLimiter>> {
         let mut endpoints_limiters = HashMap::new();

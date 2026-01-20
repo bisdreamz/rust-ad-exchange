@@ -1,6 +1,6 @@
 use crate::app::pipeline::syncing::r#in::context::SyncInContext;
-use crate::core::managers::BidderManager;
-use anyhow::{Error, anyhow, bail};
+use crate::core::managers::DemandManager;
+use anyhow::{anyhow, bail, Error};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use std::sync::Arc;
@@ -9,11 +9,11 @@ use std::sync::Arc;
 /// and attached the demand partner to context. At
 /// time of writing this *only expects partner id to be demand!*
 pub struct ExtractDemandTask {
-    bidder_manager: Arc<BidderManager>,
+    bidder_manager: Arc<DemandManager>,
 }
 
 impl ExtractDemandTask {
-    pub fn new(bidder_manager: Arc<BidderManager>) -> Self {
+    pub fn new(bidder_manager: Arc<DemandManager>) -> Self {
         Self { bidder_manager }
     }
 }

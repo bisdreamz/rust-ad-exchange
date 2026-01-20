@@ -1,7 +1,7 @@
-use crate::core::managers::BidderManager;
+use crate::core::managers::DemandManager;
 use crate::core::models::shaping::{ShapingFeature, TrafficShaping};
 use crate::core::shaping::tree::TreeShaper;
-use anyhow::{Error, bail};
+use anyhow::{bail, Error};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +23,7 @@ pub struct ShaperManager {
 }
 
 impl ShaperManager {
-    pub fn new(manager: &BidderManager) -> Result<Self, Error> {
+    pub fn new(manager: &DemandManager) -> Result<Self, Error> {
         let mut shape_map = HashMap::new();
 
         for (bidder, endpoints) in manager.bidders_endpoints() {

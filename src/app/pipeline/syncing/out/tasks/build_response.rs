@@ -1,18 +1,18 @@
 use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
-use crate::core::managers::BidderManager;
+use crate::core::managers::DemandManager;
 use crate::core::models::sync::{SyncConfig, SyncKind};
 use crate::core::usersync;
-use anyhow::{Error, bail};
+use anyhow::{bail, Error};
 use pipeline::BlockingTask;
 use std::sync::Arc;
 use tracing::warn;
 
 pub struct BuildSyncOutResponseTask {
-    bidders: Arc<BidderManager>,
+    bidders: Arc<DemandManager>,
 }
 
 impl BuildSyncOutResponseTask {
-    pub fn new(bidders: Arc<BidderManager>) -> Self {
+    pub fn new(bidders: Arc<DemandManager>) -> Self {
         Self { bidders }
     }
 }

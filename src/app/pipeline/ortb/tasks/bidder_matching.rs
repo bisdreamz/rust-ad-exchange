@@ -1,14 +1,14 @@
-use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
-use crate::core::managers::BidderManager;
+use crate::app::pipeline::ortb::AuctionContext;
+use crate::core::managers::DemandManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::spec::nobidreasons;
-use anyhow::{Error, bail};
+use anyhow::{bail, Error};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
-use rtb::BidRequest;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
+use rtb::BidRequest;
 use std::sync::Arc;
 use tracing::log::debug;
 use tracing::{Instrument, Span};
@@ -89,11 +89,11 @@ fn get_filtered_matching(
 }
 
 pub struct BidderMatchingTask {
-    manager: Arc<BidderManager>,
+    manager: Arc<DemandManager>,
 }
 
 impl BidderMatchingTask {
-    pub fn new(manager: Arc<BidderManager>) -> Self {
+    pub fn new(manager: Arc<DemandManager>) -> Self {
         Self { manager }
     }
 

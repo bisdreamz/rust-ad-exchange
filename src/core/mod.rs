@@ -1,5 +1,6 @@
 pub mod cluster;
 pub mod config_manager;
+pub mod firestore;
 pub mod demand;
 pub mod enrichment;
 pub mod events;
@@ -10,3 +11,4 @@ pub mod observability;
 pub mod shaping;
 pub mod spec;
 pub mod usersync;
+pub mod providers;

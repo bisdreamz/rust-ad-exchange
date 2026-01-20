@@ -1,16 +1,17 @@
 use crate::app::config::RexConfig;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::syncing::r#in::context::SyncInContext;
 use crate::app::pipeline::syncing::out::context::SyncOutContext;
+use crate::app::pipeline::syncing::r#in::context::SyncInContext;
 use crate::core::cluster::ClusterDiscovery;
 use crate::core::demand::notifications::DemandNotificationsCache;
 use crate::core::enrichment::device::DeviceLookup;
 use crate::core::filters::bot::IpRiskFilter;
-use crate::core::managers::{BidderManager, PublisherManager, ShaperManager};
+use crate::core::managers::{DemandManager, PublisherManager, ShaperManager};
 use crate::core::observability::ObservabilityProviders;
 use crate::core::usersync::SyncStore;
 use anyhow::Error;
+use firestore::FirestoreDb;
 use pipeline::Pipeline;
 use rtb::server::Server;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -30,7 +31,7 @@ pub struct StartupContext {
 
     // Shared things and data providers
     /// Maintains updated list of bidders and endpoints
-    pub bidder_manager: OnceLock<Arc<BidderManager>>,
+    pub bidder_manager: OnceLock<Arc<DemandManager>>,
     /// Maintains list of publishers
     pub pub_manager: OnceLock<Arc<PublisherManager>>,
     /// Traffic shaping instances per endpoint
@@ -41,6 +42,8 @@ pub struct StartupContext {
     pub sync_store: OnceLock<Arc<dyn SyncStore>>,
     /// Responsible for observing cluster sizing changes
     pub cluster_manager: OnceLock<Arc<dyn ClusterDiscovery>>,
+    /// Optional Firestore client, if configured
+    pub firestore: OnceLock<Option<Arc<FirestoreDb>>>,
 
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline

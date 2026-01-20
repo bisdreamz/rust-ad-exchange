@@ -53,6 +53,7 @@ smallvec = "1.15.1"
 mimalloc = "0.1.48"
 derivative = "2.2.0"
 humantime-serde = "1.1.1"
+firestore = "0.47.1"
 
 [profile.release]
 debug = 0

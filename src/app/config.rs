@@ -56,6 +56,17 @@ impl Default for ClusterConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirestoreConfig {
+    pub project_id: String,
+    #[serde(default)]
+    pub database_id: Option<String>,
+    #[serde(default)]
+    pub credentials_path: Option<PathBuf>,
+    #[serde(default)]
+    pub emulator_host: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
     pub ssl: Option<TlsConfig>,
@@ -69,6 +80,8 @@ pub struct RexConfig {
     #[serde(default)]
     pub logging: LoggingConfig,
     pub schain_limit: u32,
+    #[serde(default)]
+    pub firestore: Option<FirestoreConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

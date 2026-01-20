@@ -1,15 +1,14 @@
+use crate::app::config::BidderConfig;
 use crate::app::context::StartupContext;
 use crate::core::config_manager::ConfigManager;
-use crate::core::managers::BidderManager;
-use anyhow::{Error, format_err};
-use pipeline::BlockingTask;
+use crate::core::managers::DemandManager;
+use crate::core::providers::{ConfigDemandProvider, FirestoreProvider, Provider};
+use anyhow::{anyhow, Error};
+use async_trait::async_trait;
+use pipeline::AsyncTask;
 use std::sync::Arc;
-use tracing::instrument;
+use tracing::{info, instrument};
 
-/// Responsible for loading the bidder configs
-/// Right now, simply a task to run after config manager
-/// task runs to parse+validate the config, but later
-/// could load real configs from a db
 pub struct BidderManagerLoadTask {
     config_manager: Arc<ConfigManager>,
 }
@@ -20,15 +19,28 @@ impl BidderManagerLoadTask {
     }
 }
 
-impl BlockingTask<StartupContext, Error> for BidderManagerLoadTask {
+#[async_trait]
+impl AsyncTask<StartupContext, Error> for BidderManagerLoadTask {
     #[instrument(skip_all, name = "bidder_manager_load_task")]
-    fn run(&self, context: &StartupContext) -> Result<(), Error> {
-        let bidder_manager = BidderManager::new(self.config_manager.as_ref());
+    async fn run(&self, context: &StartupContext) -> Result<(), Error> {
+        let provider: Arc<dyn Provider<BidderConfig>> = match context.firestore.get() {
+            None => return Err(anyhow!("Firestore task must run before bidder manager")),
+            Some(None) => {
+                info!("Loading bidders from config");
+                Arc::new(ConfigDemandProvider::new(self.config_manager.clone()))
+            }
+            Some(Some(db)) => {
+                info!("Loading bidders from Firestore");
+                Arc::new(FirestoreProvider::new(db.clone(), "bidders"))
+            }
+        };
+
+        let demand_manager = DemandManager::start(provider).await?;
 
         context
             .bidder_manager
-            .set(Arc::new(bidder_manager))
-            .map_err(|_| format_err!("Can't init bidder manager"))?;
+            .set(demand_manager)
+            .map_err(|_| anyhow!("Can't init bidder manager"))?;
 
         Ok(())
     }
