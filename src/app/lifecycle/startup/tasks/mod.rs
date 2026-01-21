@@ -1,10 +1,10 @@
 pub mod bidders_load;
 pub mod cluster;
 pub mod config_load;
-pub mod firestore;
 pub mod demand_url_cache;
 pub mod device_load;
 pub mod event_pipeline;
+pub mod firestore;
 pub mod ip_risk_load;
 pub mod observability;
 pub mod pubs_load;

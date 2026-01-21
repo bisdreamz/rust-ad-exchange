@@ -2,7 +2,7 @@ use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
 use crate::core::managers::DemandManager;
 use crate::core::models::sync::{SyncConfig, SyncKind};
 use crate::core::usersync;
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use pipeline::BlockingTask;
 use std::sync::Arc;
 use tracing::warn;

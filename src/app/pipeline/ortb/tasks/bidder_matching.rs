@@ -1,14 +1,14 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::core::managers::DemandManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::spec::nobidreasons;
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
+use rtb::BidRequest;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use rtb::BidRequest;
 use std::sync::Arc;
 use tracing::log::debug;
 use tracing::{Instrument, Span};

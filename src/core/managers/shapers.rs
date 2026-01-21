@@ -1,7 +1,7 @@
 use crate::core::managers::DemandManager;
 use crate::core::models::shaping::{ShapingFeature, TrafficShaping};
 use crate::core::shaping::tree::TreeShaper;
-use anyhow::{bail, Error};
+use anyhow::{Error, bail};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

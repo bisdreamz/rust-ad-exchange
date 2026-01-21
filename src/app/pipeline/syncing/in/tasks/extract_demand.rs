@@ -1,6 +1,6 @@
 use crate::app::pipeline::syncing::r#in::context::SyncInContext;
 use crate::core::managers::DemandManager;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use std::sync::Arc;

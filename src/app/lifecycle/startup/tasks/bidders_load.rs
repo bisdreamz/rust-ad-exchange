@@ -3,7 +3,7 @@ use crate::app::context::StartupContext;
 use crate::core::config_manager::ConfigManager;
 use crate::core::managers::DemandManager;
 use crate::core::providers::{ConfigDemandProvider, FirestoreProvider, Provider};
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use std::sync::Arc;

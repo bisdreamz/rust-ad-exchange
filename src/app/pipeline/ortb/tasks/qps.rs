@@ -1,9 +1,9 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
 use crate::core::cluster::ClusterDiscovery;
 use crate::core::managers::DemandManager;
 use crate::core::spec::nobidreasons;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
@@ -13,7 +13,7 @@ use rtb::common::bidresponsestate::BidResponseState;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use tracing::{debug, trace, warn, Instrument, Span};
+use tracing::{Instrument, Span, debug, trace, warn};
 
 /// Responsible for enforcing QPS limits per endpoint,
 /// for callouts which do not already have a skip_reason assigned

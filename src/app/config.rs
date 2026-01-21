@@ -73,7 +73,7 @@ pub struct SchainConfig {
     /// schain ASI, e.g. domain e.g. myads.com
     pub asi: String,
     /// schain partner name e.g. MyAds
-    pub name: String
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]

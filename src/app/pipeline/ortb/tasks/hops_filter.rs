@@ -1,11 +1,11 @@
 use crate::app::pipeline::ortb::tasks::utils;
-use crate::app::pipeline::ortb::{telemetry, AuctionContext};
-use anyhow::{anyhow, bail, Error};
+use crate::app::pipeline::ortb::{AuctionContext, telemetry};
+use anyhow::{Error, anyhow, bail};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::log::debug;
 use tracing::Span;
+use tracing::log::debug;
 
 /// Will hard block inbound requests which exceed the
 /// configured allowed schain nodes length limit

@@ -20,9 +20,9 @@ impl AsyncTask<StartupContext, Error> for FirestoreTask {
         let firestore = if let Some(fs_config) = &config.firestore {
             info!("Connecting to Firestore project: {}", fs_config.project_id);
 
-            let client = create_client(fs_config).await.map_err(|e| {
-                anyhow!("Failed to connect to Firestore: {}", e)
-            })?;
+            let client = create_client(fs_config)
+                .await
+                .map_err(|e| anyhow!("Failed to connect to Firestore: {}", e))?;
 
             info!("Connected to Firestore");
             Some(Arc::new(client))

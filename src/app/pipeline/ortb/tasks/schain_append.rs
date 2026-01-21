@@ -1,7 +1,7 @@
 use crate::app::config::SchainConfig;
+use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::tasks::utils;
-use crate::app::pipeline::ortb::{AuctionContext};
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::bid_request::{SourceBuilder, SupplyChainBuilder, SupplyChainNodeBuilder};
 use rtb::child_span_info;
@@ -10,7 +10,7 @@ use tracing::{debug, trace};
 /// Will append our schain hop to the supplychain obj
 /// if a config is Some
 pub struct SchainAppendTask {
-    config: Option<SchainConfig>
+    config: Option<SchainConfig>,
 }
 
 impl SchainAppendTask {
@@ -25,27 +25,21 @@ impl BlockingTask<AuctionContext, Error> for SchainAppendTask {
             None => {
                 trace!("No schain config present, skipping schain append");
 
-                return Ok(())
-            },
-            Some(config) => config
+                return Ok(());
+            }
+            Some(config) => config,
         };
 
-        let span = child_span_info!(
-            "schain_append_task",
-            schain = tracing::field::Empty
-        )
-        .entered();
+        let span = child_span_info!("schain_append_task", schain = tracing::field::Empty).entered();
 
         let mut req = context.req.write();
 
         let mut source = match req.source.take() {
             Some(s) => s,
-            None => {
-                SourceBuilder::default()
-                    .tid(req.id.clone())
-                    .build()
-                    .map_err(|_| anyhow!("Failed to create source object"))?
-            }
+            None => SourceBuilder::default()
+                .tid(req.id.clone())
+                .build()
+                .map_err(|_| anyhow!("Failed to create source object"))?,
         };
 
         // take schain to we can ensure it ends up in a single location
@@ -67,7 +61,7 @@ impl BlockingTask<AuctionContext, Error> for SchainAppendTask {
                 schain.nodes.push(node);
 
                 schain
-            },
+            }
             None => {
                 // no schain received, expecting partners behave,
                 // this is a direct publisher w/o hops. TODO

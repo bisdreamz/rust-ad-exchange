@@ -84,7 +84,9 @@ pub fn build_auction_pipeline(
         )))
         .with_blocking(Box::new(tasks::IpBlockTask::new(ip_risk_filter)))
         .with_blocking(Box::new(tasks::DeviceLookupTask::new(device_lookup)))
-        .with_blocking(Box::new(tasks::SchainAppendTask::new(config.schain.clone())))
+        .with_blocking(Box::new(tasks::SchainAppendTask::new(
+            config.schain.clone(),
+        )))
         .with_blocking(Box::new(tasks::LocalIdentityTask))
         .with_async(Box::new(tasks::BidderMatchingTask::new(
             bidder_manager.clone(),

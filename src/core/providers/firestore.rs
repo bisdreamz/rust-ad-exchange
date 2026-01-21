@@ -46,12 +46,19 @@ where
             match FirestoreDb::deserialize_doc_to::<T>(&doc) {
                 Ok(obj) => results.push(obj),
                 Err(err) => {
-                    warn!("Failed to deserialize document {} during load: {}", doc.name, err);
+                    warn!(
+                        "Failed to deserialize document {} during load: {}",
+                        doc.name, err
+                    );
                 }
             }
         }
 
-        debug!("Loaded {} documents from Firestore collection {}", results.len(), self.collection);
+        debug!(
+            "Loaded {} documents from Firestore collection {}",
+            results.len(),
+            self.collection
+        );
         Ok((results, seen))
     }
 
@@ -70,12 +77,26 @@ where
             let mut is_reconnect = false;
 
             loop {
-                match Self::run_listener(&db, &collection, seen_docs.clone(), on_event.clone(), is_reconnect).await {
+                match Self::run_listener(
+                    &db,
+                    &collection,
+                    seen_docs.clone(),
+                    on_event.clone(),
+                    is_reconnect,
+                )
+                .await
+                {
                     Ok(()) => {
-                        warn!("Firestore listener for {} exited unexpectedly, reconnecting", collection);
+                        warn!(
+                            "Firestore listener for {} exited unexpectedly, reconnecting",
+                            collection
+                        );
                     }
                     Err(err) => {
-                        error!("Firestore listener for {} failed: {}, reconnecting in {:?}", collection, err, backoff);
+                        error!(
+                            "Firestore listener for {} failed: {}, reconnecting in {:?}",
+                            collection, err, backoff
+                        );
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(max_backoff);
                         is_reconnect = true;
@@ -95,12 +116,7 @@ where
         seen_docs: &RwLock<HashSet<String>>,
         on_event: &(dyn Fn(ProviderEvent<T>) + Send + Sync),
     ) -> Result<(), Error> {
-        let docs = db
-            .fluent()
-            .select()
-            .from(collection)
-            .query()
-            .await?;
+        let docs = db.fluent().select().from(collection).query().await?;
 
         let mut current_docs = HashSet::new();
         for doc in &docs {
@@ -121,14 +137,21 @@ where
             match FirestoreDb::deserialize_doc_to::<T>(&doc) {
                 Ok(obj) => on_event(ProviderEvent::Modified(obj)),
                 Err(err) => {
-                    warn!("Failed to deserialize document {} during reconcile: {}", doc.name, err);
+                    warn!(
+                        "Failed to deserialize document {} during reconcile: {}",
+                        doc.name, err
+                    );
                 }
             }
         }
 
         *seen_docs.write() = current_docs;
 
-        debug!("Reconciled {} documents for collection {}", seen_docs.read().len(), collection);
+        debug!(
+            "Reconciled {} documents for collection {}",
+            seen_docs.read().len(),
+            collection
+        );
         Ok(())
     }
 
@@ -182,12 +205,22 @@ where
                         }
                         FirestoreListenEvent::DocumentDelete(del) => {
                             seen_docs.write().remove(&del.document);
-                            let doc_id = del.document.rsplit('/').next().unwrap_or(&del.document).to_string();
+                            let doc_id = del
+                                .document
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(&del.document)
+                                .to_string();
                             on_event(ProviderEvent::Removed(doc_id));
                         }
                         FirestoreListenEvent::DocumentRemove(rem) => {
                             seen_docs.write().remove(&rem.document);
-                            let doc_id = rem.document.rsplit('/').next().unwrap_or(&rem.document).to_string();
+                            let doc_id = rem
+                                .document
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(&rem.document)
+                                .to_string();
                             on_event(ProviderEvent::Removed(doc_id));
                         }
                         _ => {}

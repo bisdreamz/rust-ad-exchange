@@ -3,7 +3,7 @@ use crate::core::config_manager::ConfigManager;
 use crate::core::managers::PublisherManager;
 use crate::core::models::publisher::Publisher;
 use crate::core::providers::{ConfigPublisherProvider, FirestoreProvider, Provider};
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use std::sync::Arc;
