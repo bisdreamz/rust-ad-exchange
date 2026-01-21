@@ -4,7 +4,7 @@ use crate::core::events::billing::{BillingEvent, BillingEventBuilder};
 use crate::core::models::bidder::{Bidder, Endpoint};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
-use log::debug;
+use tracing::debug;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use rtb::common::DataUrl;

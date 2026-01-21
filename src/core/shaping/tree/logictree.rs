@@ -6,7 +6,6 @@ use crate::core::shaping::tree::handler::{
 use crate::core::shaping::{tree, utils};
 use anyhow::{Error, anyhow, bail, format_err};
 use arc_swap::ArcSwap;
-use log::info;
 use logictree::{Feature, LogicTree};
 use rtb::BidRequest;
 use rtb::bid_response::Bid;
@@ -14,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
 use tokio::time::Instant;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 fn task_cycle_threshold(
     histogram: &QpsHistogram,

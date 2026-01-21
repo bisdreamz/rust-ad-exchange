@@ -4,7 +4,6 @@ use crate::core::models::publisher::Publisher;
 use crate::core::usersync::SyncStore;
 use anyhow::{Error, anyhow};
 use async_trait::async_trait;
-use log::log_enabled;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
@@ -58,7 +57,7 @@ impl IdentityDemandTask {
             span.record("buyer_uids", format!("{:?}", buyer_uids_map));
         }
 
-        if log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             trace!("Buyeruids map: {:?}", buyer_uids_map);
         }
 

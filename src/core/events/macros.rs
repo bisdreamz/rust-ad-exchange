@@ -1,4 +1,4 @@
-use log::warn;
+use tracing::warn;
 use rtb::bid_response::{Bid, SeatBid};
 use rtb::{BidRequest, BidResponse};
 use std::time::{SystemTime, UNIX_EPOCH};

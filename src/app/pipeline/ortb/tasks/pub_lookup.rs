@@ -3,7 +3,7 @@ use crate::core::managers::PublisherManager;
 use crate::core::models::publisher::Publisher;
 use crate::core::spec::nobidreasons;
 use anyhow::{Error, anyhow, bail};
-use log::debug;
+use tracing::debug;
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;

@@ -1,7 +1,7 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::core::events::billing::BillingEvent;
 use anyhow::{Error, bail};
-use log::debug;
+use tracing::debug;
 use pipeline::BlockingTask;
 
 pub struct ExtractBillingEventTask;

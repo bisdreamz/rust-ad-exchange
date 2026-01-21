@@ -9,7 +9,6 @@ use actix_web::web;
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
-use log::warn;
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
 use pipeline::{AsyncTask, Pipeline};
@@ -19,7 +18,7 @@ use rtb::server::{Server, ServerConfig};
 use rtb::{BidRequest, sample_or_attach_root_span};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use tracing::{Instrument, debug, info, instrument};
+use tracing::{Instrument, debug, info, instrument, warn};
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex")

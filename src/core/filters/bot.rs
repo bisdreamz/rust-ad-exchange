@@ -6,7 +6,7 @@ use moka::sync::Cache;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::log::debug;
+use tracing::debug;
 
 const DATA_URL: &str =
     "https://raw.githubusercontent.com/the-furry-hubofeverything/vps-ranges/refs/heads/main/ip.txt";

@@ -6,8 +6,7 @@ use pipeline::BlockingTask;
 use rtb::bid_request::Device;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::Span;
-use tracing::log::debug;
+use tracing::{Span, debug};
 
 pub struct DeviceLookupTask {
     lookup: DeviceLookup,

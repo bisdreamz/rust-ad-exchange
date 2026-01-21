@@ -4,8 +4,7 @@ use anyhow::{Error, anyhow, bail};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::Span;
-use tracing::log::debug;
+use tracing::{Span, debug};
 
 /// Will hard block inbound requests which exceed the
 /// configured allowed schain nodes length limit

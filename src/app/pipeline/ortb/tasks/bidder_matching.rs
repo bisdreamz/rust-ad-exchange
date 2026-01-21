@@ -10,7 +10,7 @@ use rtb::BidRequest;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use std::sync::Arc;
-use tracing::log::debug;
+use tracing::debug;
 use tracing::{Instrument, Span};
 
 fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> bool {

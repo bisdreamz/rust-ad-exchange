@@ -1,6 +1,6 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use anyhow::{Error, bail};
-use log::debug;
+use tracing::debug;
 use pipeline::BlockingTask;
 use rtb::common::DataUrl;
 
