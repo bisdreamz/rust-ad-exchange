@@ -67,6 +67,15 @@ pub struct FirestoreConfig {
     pub emulator_host: Option<String>,
 }
 
+/// Configuration for appending schain to bid requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchainConfig {
+    /// schain ASI, e.g. domain e.g. myads.com
+    pub asi: String,
+    /// schain partner name e.g. MyAds
+    pub name: String
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct RexConfig {
     pub ssl: Option<TlsConfig>,
@@ -79,6 +88,7 @@ pub struct RexConfig {
     pub cluster: ClusterConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    pub schain: Option<SchainConfig>,
     pub schain_limit: u32,
     #[serde(default)]
     pub firestore: Option<FirestoreConfig>,

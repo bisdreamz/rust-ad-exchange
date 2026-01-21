@@ -52,6 +52,8 @@ mod floors_markup;
 mod identity_demand;
 mod identity_request;
 mod margin_task;
+mod utils;
+mod schain_append;
 
 pub use margin_task::BidMarginTask;
 
@@ -59,3 +61,4 @@ pub use floors_markup::FloorsMarkupTask;
 
 pub use identity_demand::IdentityDemandTask;
 pub use identity_request::LocalIdentityTask;
+pub use schain_append::SchainAppendTask;

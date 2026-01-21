@@ -1,10 +1,11 @@
-use crate::app::pipeline::ortb::{AuctionContext, telemetry};
-use anyhow::{Error, anyhow, bail};
+use crate::app::pipeline::ortb::tasks::utils;
+use crate::app::pipeline::ortb::{telemetry, AuctionContext};
+use anyhow::{anyhow, bail, Error};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::Span;
 use tracing::log::debug;
+use tracing::Span;
 
 /// Will hard block inbound requests which exceed the
 /// configured allowed schain nodes length limit
@@ -45,22 +46,9 @@ impl BlockingTask<AuctionContext, Error> for SchainHopsGlobalFilter {
             return Ok(());
         }
 
-        let source = req.source.as_ref().unwrap();
+        let schain_opt = utils::schain::resolve_schain(req.source.as_ref());
 
-        let mut schain_opt = source.schain.as_ref();
-
-        // very commonly still placed in source.ext.schain
-        if schain_opt.is_none() {
-            let source_ext_opt = source.ext.as_ref();
-
-            if let Some(source_ext) = source_ext_opt {
-                #[allow(deprecated)]
-                if let Some(source_ext_schain) = source_ext.schain.as_ref() {
-                    schain_opt = Some(source_ext_schain);
-                }
-            }
-        }
-
+        // if we found it in the source.ext.schain instead
         if schain_opt.is_none() {
             span.record("hops_filter_result", "passed_no_source.schain");
             span.record("hops_filter_len", 0);
