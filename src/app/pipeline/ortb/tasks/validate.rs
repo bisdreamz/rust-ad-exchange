@@ -15,8 +15,6 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         )
         .entered();
 
-        // TODO attach seller span context
-
         debug!(
             "Validating request for seller {} source {}",
             context.pubid, context.source
@@ -44,7 +42,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
         let device_opt = req.device.as_ref();
         if device_opt.is_none() {
             let brs = BidResponseState::NoBidReason {
-                reqid: req.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing device object".into()),
             };
@@ -63,7 +61,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
         if device.ua.is_empty() {
             let brs = BidResponseState::NoBidReason {
-                reqid: req.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing device user-agent".into()),
             };
@@ -80,7 +78,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
         if req.imp.is_empty() {
             let brs = BidResponseState::NoBidReason {
-                reqid: req.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Empty imps".into()),
             };
@@ -97,7 +95,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
         if req.distributionchannel_oneof.is_none() {
             let brs = BidResponseState::NoBidReason {
-                reqid: req.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some("Missing app, site, or dooh object".into()),
             };

@@ -65,7 +65,7 @@ impl BlockingTask<AuctionContext, Error> for SchainHopsGlobalFilter {
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "schain_length");
 
             let brs = BidResponseState::NoBidReason {
-                reqid: req.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::BLOCKED_SUPPLYCHAIN_NODE,
                 desc: "Too many schain hops".into(),
             };

@@ -1,10 +1,10 @@
 use crate::app::context::StartupContext;
 use crate::core::managers::ShaperManager;
 use anyhow::{Error, anyhow};
-use tracing::debug;
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use std::sync::Arc;
+use tracing::debug;
 
 pub struct ShapersManagerLoadTask;
 

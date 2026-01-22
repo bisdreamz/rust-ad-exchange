@@ -50,7 +50,7 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
 
         if device_opt.is_none() {
             let brs = BidResponseState::NoBidReason {
-                reqid: req_borrow.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::UNSUPPORTED_DEVICE,
                 desc: "Unrecognized user-agent string".into(),
             };
@@ -70,7 +70,7 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
 
         if device.devtype == DeviceType::Bot {
             let brs = BidResponseState::NoBidReason {
-                reqid: req_borrow.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::KNOWN_WEB_CRAWLER,
                 desc: "Detected ua bot".into(),
             };

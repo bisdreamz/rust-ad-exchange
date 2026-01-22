@@ -4,12 +4,12 @@ use crate::core::events::billing::{BillingEvent, BillingEventBuilder};
 use crate::core::models::bidder::{Bidder, Endpoint};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
-use tracing::debug;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use rtb::common::DataUrl;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::utils::detect_ad_format;
+use tracing::debug;
 use tracing::{Instrument, warn};
 
 fn build_billing_event(
@@ -216,7 +216,7 @@ impl NotificationsUrlCreationTask {
 
         if errs > 0 && total == errs {
             let brs = BidResponseState::NoBidReason {
-                reqid: context.req.read().id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::TECHNICAL_ERROR,
                 desc: Some("Had bids but all failed event url creation"),
             };

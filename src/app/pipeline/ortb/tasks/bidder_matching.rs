@@ -119,7 +119,7 @@ impl BidderMatchingTask {
             let msg = "No matching bidders";
 
             let brs = BidResponseState::NoBidReason {
-                reqid: context.req.read().id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: nobidreasons::NO_BUYERS_PREMATCHED,
                 desc: Some(msg),
             };

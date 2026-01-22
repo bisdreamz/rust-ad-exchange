@@ -200,7 +200,6 @@ impl NotificationsUrlInjectionTask {
 
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
         let mut bidders = context.bidders.lock().await;
-        let req = context.req.read();
 
         let mut total = 0;
         let mut errs = 0;
@@ -211,6 +210,10 @@ impl NotificationsUrlInjectionTask {
                     Some(res) => res,
                     None => continue,
                 };
+
+                // important - use actual request sent to bidder
+                // to fill macros
+                let req = &callout.req;
 
                 let bid_response_context = match &mut res.state {
                     BidderResponseState::Bid(bid_response) => bid_response,
@@ -232,7 +235,7 @@ impl NotificationsUrlInjectionTask {
 
         if errs > 0 && total == errs {
             let brs = BidResponseState::NoBidReason {
-                reqid: context.req.read().id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::TECHNICAL_ERROR,
                 desc: Some("Had bids but all failed post processing"),
             };

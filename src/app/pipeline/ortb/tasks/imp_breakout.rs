@@ -1,18 +1,18 @@
-use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
+use crate::app::pipeline::ortb::AuctionContext;
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use tracing::{Instrument, debug, trace, warn};
+use tracing::{debug, trace, warn, Instrument};
 
 fn expand_requests(callouts: Vec<BidderCallout>) -> Vec<BidderCallout> {
-    let mut expanded_callouts = Vec::with_capacity(callouts.len() * 2);
-
     if callouts.len() == 1 && callouts.first().unwrap().req.imp.len() == 1 {
         // if only one req exists and its 1 imp anyway.. short circuit return our arg
         return callouts;
     }
+
+    let mut expanded_callouts = Vec::with_capacity(callouts.len() * 2);
 
     for callout in callouts {
         if callout.req.imp.len() == 1 {
@@ -21,13 +21,29 @@ fn expand_requests(callouts: Vec<BidderCallout>) -> Vec<BidderCallout> {
         }
 
         let mut req = callout.req;
+        let original_id = req.id.clone();
         let imps = std::mem::take(&mut req.imp);
 
         let mut reqs: Vec<_> = (1..imps.len()).map(|_| req.clone()).collect();
         reqs.push(req);
 
-        for (imp, mut expanded_request) in imps.into_iter().zip(reqs) {
+        for (idx, (imp, mut expanded_request)) in imps.into_iter().zip(reqs).enumerate() {
+            expanded_request.id = format!("{}-{}", idx, original_id);
             expanded_request.imp.push(imp);
+
+            if let Some(source) = expanded_request.source.as_mut() {
+                if let Some(schain) = source.schain.as_mut() {
+                    if let Some(last_node) = schain.nodes.last_mut() {
+                        last_node.rid = expanded_request.id.clone();
+                        // retain original tid so it has some semblance of value
+
+                        trace!(
+                            "Updated schain node RID to {} for ep {}",
+                            expanded_request.id, callout.endpoint.name
+                        );
+                    }
+                }
+            }
 
             expanded_callouts.push(BidderCallout {
                 endpoint: callout.endpoint.clone(),
@@ -121,8 +137,8 @@ impl AsyncTask<AuctionContext, Error> for MultiImpBreakoutTask {
 mod tests {
     use super::*;
     use crate::core::models::bidder::Endpoint;
-    use rtb::BidRequestBuilder;
     use rtb::bid_request::ImpBuilder;
+    use rtb::BidRequestBuilder;
     use std::sync::{Arc, OnceLock};
 
     fn create_test_endpoint() -> Arc<Endpoint> {
@@ -190,13 +206,17 @@ mod tests {
 
         assert_eq!(result.len(), 3, "Should expand to 3 separate callouts");
 
-        for expanded in result.iter() {
+        for (idx, expanded) in result.iter().enumerate() {
             assert_eq!(
                 expanded.req.imp.len(),
                 1,
                 "Each expanded request should have exactly 1 imp"
             );
-            assert_eq!(expanded.req.id, "test_req_multi", "Request ID preserved");
+            assert_eq!(
+                expanded.req.id,
+                format!("{}-test_req_multi", idx),
+                "Request ID should have index prefix"
+            );
         }
 
         let imp_ids: Vec<_> = result.iter().map(|bc| bc.req.imp[0].id.as_str()).collect();
@@ -274,6 +294,7 @@ mod tests {
             .unwrap();
 
         let context = AuctionContext::new(
+            "original_req".to_string(),
             "/test".to_string(),
             "pub123".to_string(),
             original_req,
@@ -311,5 +332,13 @@ mod tests {
             3,
             "Bidder should have 3 expanded callouts"
         );
+
+        for (idx, callout) in bidder_context.callouts.iter().enumerate() {
+            assert_eq!(
+                callout.req.id,
+                format!("{}-original_req", idx),
+                "Expanded callout should have index-prefixed ID"
+            );
+        }
     }
 }

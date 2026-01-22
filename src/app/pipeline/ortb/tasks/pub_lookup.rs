@@ -3,19 +3,19 @@ use crate::core::managers::PublisherManager;
 use crate::core::models::publisher::Publisher;
 use crate::core::spec::nobidreasons;
 use anyhow::{Error, anyhow, bail};
-use tracing::debug;
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use std::sync::Arc;
 use tracing::Span;
+use tracing::debug;
 
 fn record_and_bail_if_empty(context: &AuctionContext) -> Result<(), Error> {
     let parent_span = Span::current();
 
     if context.pubid.trim().is_empty() {
         let brs = BidResponseState::NoBidReason {
-            reqid: context.req.read().id.clone(),
+            reqid: context.original_auction_id.clone(),
             nbr: nobidreasons::UNKNOWN_SELLER,
             desc: Some("Empty pub id"),
         };
@@ -41,7 +41,7 @@ fn record_and_bail_if_disabled(
 
     if !publisher.enabled {
         let brs = BidResponseState::NoBidReason {
-            reqid: context.req.read().id.clone(),
+            reqid: context.original_auction_id.clone(),
             nbr: nobidreasons::SELLER_DISABLED,
             desc: Some("Publisher account has been disabled"),
         };
@@ -67,6 +67,7 @@ impl PubLookupTask {
     pub fn new(manager: Arc<PublisherManager>) -> Self {
         Self { manager }
     }
+
     fn lookup_pub_or_bail(&self, context: &AuctionContext) -> Result<Arc<Publisher>, Error> {
         let parent_span = Span::current();
         let _span = child_span_info!("pub_lookup_task_lookup").entered();
@@ -76,7 +77,7 @@ impl PubLookupTask {
         }
 
         let brs = BidResponseState::NoBidReason {
-            reqid: context.req.read().id.clone(),
+            reqid: context.original_auction_id.clone(),
             nbr: nobidreasons::UNKNOWN_SELLER,
             desc: Some("Publisher id unrecognized"),
         };

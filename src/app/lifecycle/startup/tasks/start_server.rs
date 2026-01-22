@@ -78,13 +78,14 @@ fn record_request_metric(
 }
 
 async fn handle_bid_request_instrumented(
+    auction_id: String,
     pubid: String,
     source: String,
     req: BidRequest,
     cookies: Option<HashMap<String, String>>,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
 ) -> (BidResponseState, bool) {
-    let mut ctx = AuctionContext::new(source.clone(), pubid, req, cookies);
+    let mut ctx = AuctionContext::new(auction_id, source.clone(), pubid, req, cookies);
 
     let pipeline_result = pipeline.run(&ctx).await;
 
@@ -105,6 +106,7 @@ async fn handle_bid_request_instrumented(
 }
 
 async fn handle_bid_request(
+    auction_id: String,
     pubid: String,
     source: String,
     req: BidRequest,
@@ -119,12 +121,13 @@ async fn handle_bid_request(
         source = source,
     );
 
-    handle_bid_request_instrumented(pubid, source, req, cookies, pipeline)
+    handle_bid_request_instrumented(auction_id, pubid, source, req, cookies, pipeline)
         .instrument(root_span)
         .await
 }
 
 async fn json_bid_handler(
+    auction_id: String,
     pubid: String,
     req: FastJson<BidRequest>,
     http_req: HttpRequest,
@@ -137,6 +140,7 @@ async fn json_bid_handler(
     let cookies = extract_cookies(&http_req);
 
     let (brs, pipeline_completed) = handle_bid_request(
+        auction_id,
         pubid.clone(),
         path.clone(),
         req.into_inner(),
@@ -344,10 +348,20 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                         move |pubid: web::Path<String>,
                               req: FastJson<BidRequest>,
                               http_req: HttpRequest| {
+                            let auction_id = req.id.clone();
                             let pubid = pubid.into_inner();
                             let p = pipeline.clone();
+
                             async move {
-                                json_bid_handler(pubid, req, http_req, p, span_sample_rate).await
+                                json_bid_handler(
+                                    auction_id,
+                                    pubid,
+                                    req,
+                                    http_req,
+                                    p,
+                                    span_sample_rate,
+                                )
+                                .await
                             }
                         }
                     }),

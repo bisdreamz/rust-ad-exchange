@@ -90,13 +90,12 @@ impl BidSettlementTask {
 
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
         let bidders = context.bidders.lock().await;
-        let req = context.req.read();
 
         let mut seats = self.build_seats(&bidders);
 
         if seats.is_empty() {
             let final_nobid_state = BidResponseState::NoBidReason {
-                reqid: req.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: nobidreasons::NO_CAMPAIGNS_FOUND,
                 desc: Some("No bids received"),
             };
@@ -113,7 +112,7 @@ impl BidSettlementTask {
         sort_seats_by_highest_bid(&mut seats);
 
         let final_bid_response_result = BidResponseBuilder::default()
-            .id(req.id.clone())
+            .id(context.original_auction_id.clone())
             .seatbid(seats)
             .build();
 
@@ -124,7 +123,7 @@ impl BidSettlementTask {
             );
 
             let brs = BidResponseState::NoBidReason {
-                reqid: context.req.read().id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::TECHNICAL_ERROR,
                 desc: Some("Failed to build final response"),
             };

@@ -1,7 +1,7 @@
-use tracing::warn;
 use rtb::bid_response::{Bid, SeatBid};
 use rtb::{BidRequest, BidResponse};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::warn;
 
 /// Fill majority of macros we can during pre-delivery of a bid for potential win
 /// Includes auction price and mbr, expected all auctions are 1st price
@@ -16,6 +16,7 @@ pub fn fill_predelivery_macros(
     let mut text = text;
 
     // expect pub to complete if applicable for now
+    // TODO if we ever intend to really deal w/ dooh
     /*let multiplier = match &imp.qty {
         Some(qty) => {
             if qty.multiplier == 0.0 {

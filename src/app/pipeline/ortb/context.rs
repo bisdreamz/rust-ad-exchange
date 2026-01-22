@@ -179,6 +179,9 @@ pub struct IdentityContext {
 pub struct AuctionContext {
     /// Raw pubid provided from the http path, pre-validation
     pub pubid: String,
+    /// The original auction ID sent from pub, which
+    /// we need to set in our response
+    pub original_auction_id: String,
     /// Cookies present on inbound request, if any
     pub cookies: Option<HashMap<String, String>>,
     pub identity: OnceLock<IdentityContext>,
@@ -195,12 +198,14 @@ pub struct AuctionContext {
 
 impl AuctionContext {
     pub fn new(
+        original_id: String,
         source: String,
         pubid: String,
         req: BidRequest,
         cookies: Option<HashMap<String, String>>,
     ) -> AuctionContext {
         AuctionContext {
+            original_auction_id: original_id,
             pubid,
             cookies,
             event_id: Uuid::new_v4().to_string(),

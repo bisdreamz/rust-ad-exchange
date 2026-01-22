@@ -41,7 +41,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
             let msg = "Invalid IP received".into();
 
             let brs = BidResponseState::NoBidReason {
-                reqid: req_borrow.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
                 desc: Some(msg),
             };
@@ -49,7 +49,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
             context
                 .res
                 .set(brs)
-                .expect("Someone already set a BidResponseState!");
+                .map_err(|_| anyhow!("Someone already set a BidResponseState!"))?;
 
             span.record("ip_block_reason", "invalid_ip");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "invalid_ip");
@@ -63,7 +63,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
             let msg = "High risk IP".into();
 
             let brs = BidResponseState::NoBidReason {
-                reqid: req_borrow.id.clone(),
+                reqid: context.original_auction_id.clone(),
                 nbr: rtb::spec::openrtb::nobidreason::CLOUD_DATACENTER_PROXY_IP,
                 desc: Some(msg),
             };
@@ -71,7 +71,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
             context
                 .res
                 .set(brs)
-                .expect("Someone already set a BidResponseState!");
+                .map_err(|_| anyhow!("Someone already set a BidResponseState!"))?;
 
             span.record("ip_block_reason", "high_risk");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "high_risk_ip");
