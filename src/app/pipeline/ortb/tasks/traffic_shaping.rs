@@ -1,15 +1,15 @@
-use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext, CalloutSkipReason};
+use crate::app::pipeline::ortb::AuctionContext;
 use crate::core::managers::ShaperManager;
 use crate::core::shaping::tree::ShapingDecision;
 use anyhow::Error;
 use async_trait::async_trait;
 use opentelemetry::metrics::{Counter, Gauge, Histogram};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::{global, KeyValue};
 use pipeline::AsyncTask;
-use rtb::{BidRequest, child_span_info};
+use rtb::child_span_info;
 use std::sync::{Arc, LazyLock};
-use tracing::{Instrument, debug, warn};
+use tracing::{debug, warn, Instrument};
 
 static COUNTER_SHAPING_OUTCOMES: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex:demand:shaping")
@@ -42,12 +42,7 @@ impl TrafficShapingTask {
         Self { manager }
     }
 
-    fn evaluate_record_endpoint(
-        &self,
-        bidder_context: &BidderContext,
-        callout: &BidderCallout,
-        req: &BidRequest,
-    ) {
+    fn evaluate_record_endpoint(&self, bidder_context: &BidderContext, callout: &BidderCallout) {
         let shaper = match self
             .manager
             .shaper(&bidder_context.bidder.name, &callout.endpoint.name)
@@ -77,7 +72,7 @@ impl TrafficShapingTask {
             .set(shaper.clone())
             .unwrap_or_else(|_| warn!("Someone attached shaper to callout context already!"));
 
-        match shaper.passes_shaping(req) {
+        match shaper.passes_shaping(&callout.req) {
             Ok(res) => {
                 debug!(
                     "Bidder {} endpoint {} shaping result: {:?}",
@@ -135,7 +130,6 @@ impl TrafficShapingTask {
 
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
         let bidders = context.bidders.lock().await;
-        let bid_request = context.req.read();
 
         for bidder_context in bidders.iter() {
             for callout in &bidder_context.callouts {
@@ -143,7 +137,7 @@ impl TrafficShapingTask {
                     continue;
                 }
 
-                self.evaluate_record_endpoint(bidder_context, callout, &bid_request);
+                self.evaluate_record_endpoint(bidder_context, callout);
             }
         }
 
