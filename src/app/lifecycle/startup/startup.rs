@@ -3,6 +3,7 @@ use crate::app::lifecycle::startup::tasks::config_load::ConfigLoadTask;
 use crate::app::span::WrappedPipelineTask;
 use crate::app::startup::tasks::bidders_load::BidderManagerLoadTask;
 use crate::app::startup::tasks::cluster::ClusterDiscoveryTask;
+use crate::app::startup::tasks::counter_stores::CounterStoresTask;
 use crate::app::startup::tasks::demand_url_cache::DemandUrlCacheStartTask;
 use crate::app::startup::tasks::device_load::DeviceLookupLoadTask;
 use crate::app::startup::tasks::event_pipeline::BuildEventPipelineTask;
@@ -40,6 +41,7 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
     let start_pipeline = PipelineBuilder::new()
         .with_async(Box::new(ClusterDiscoveryTask))
         .with_async(Box::new(FirestoreTask))
+        .with_blocking(Box::new(CounterStoresTask))
         .with_async(Box::new(BidderManagerLoadTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(ShapersManagerLoadTask))
         .with_async(Box::new(PubsManagerLoadTask::new(cfg_manager.clone())))

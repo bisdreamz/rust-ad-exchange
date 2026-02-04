@@ -1,6 +1,6 @@
+use super::utils;
 use crate::app::config::SchainConfig;
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::tasks::utils;
 use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::bid_request::{SourceBuilder, SupplyChainBuilder, SupplyChainNodeBuilder};

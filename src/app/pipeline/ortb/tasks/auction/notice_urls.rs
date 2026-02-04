@@ -1,5 +1,7 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
+use crate::app::pipeline::ortb::context::{
+    BidContext, BidResponseContext, BidderResponseState, PublisherBlockReason,
+};
 use crate::core::events::billing::{BillingEvent, BillingEventBuilder};
 use crate::core::models::bidder::{Bidder, Endpoint};
 use anyhow::{Error, anyhow, bail};
@@ -225,6 +227,11 @@ impl NotificationsUrlCreationTask {
                 .res
                 .set(brs)
                 .map_err(|_| anyhow!("Failed to attach failed billing event creation on on ctx"))?;
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::BidsProcessingError)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             bail!("Every bid received failed create internal billing event url");
         }

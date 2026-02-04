@@ -116,6 +116,7 @@ fn build_psa_bidder_context(req: BidRequest, bids: Vec<Bid>) -> Result<BidderCon
     Ok(BidderContext {
         bidder: Arc::new(test_bidder),
         callouts: vec![bidder_callout],
+        ..Default::default()
     })
 }
 

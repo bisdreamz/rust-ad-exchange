@@ -135,14 +135,20 @@ impl BidderMatchingTask {
             let mut callouts = Vec::with_capacity(endpoints.len());
 
             for endpoint in endpoints {
-                callouts.push(BidderCallout {
+                let callout = BidderCallout {
                     endpoint: endpoint.clone(),
                     req: context.req.read().clone(),
                     ..Default::default()
-                });
+                };
+
+                callouts.push(callout);
             }
 
-            bidder_contexts.push(BidderContext { bidder, callouts });
+            bidder_contexts.push(BidderContext {
+                bidder,
+                callouts,
+                ..Default::default()
+            });
         }
 
         *context.bidders.lock().await = bidder_contexts;

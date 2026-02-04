@@ -1,4 +1,5 @@
-use crate::app::pipeline::ortb::tasks::utils;
+use super::utils;
+use crate::app::pipeline::ortb::context::PublisherBlockReason;
 use crate::app::pipeline::ortb::{AuctionContext, telemetry};
 use anyhow::{Error, anyhow, bail};
 use pipeline::BlockingTask;
@@ -74,6 +75,11 @@ impl BlockingTask<AuctionContext, Error> for SchainHopsGlobalFilter {
                 .res
                 .set(brs)
                 .map_err(|_| anyhow!("Someone already assigned brs during schain filter"))?;
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::TooManyHops)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             bail!(
                 "Hops filter limit exceeded: {} > {}",

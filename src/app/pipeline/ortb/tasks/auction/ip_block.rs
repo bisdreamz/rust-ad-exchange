@@ -1,3 +1,4 @@
+use crate::app::pipeline::ortb::context::PublisherBlockReason;
 use crate::app::pipeline::ortb::{AuctionContext, telemetry};
 use crate::core::filters::bot::IpRiskFilter;
 use anyhow::{Error, anyhow};
@@ -51,6 +52,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
                 .set(brs)
                 .map_err(|_| anyhow!("Someone already set a BidResponseState!"))?;
 
+            context
+                .block_reason
+                .set(PublisherBlockReason::IpInvalid)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
             span.record("ip_block_reason", "invalid_ip");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "invalid_ip");
 
@@ -72,6 +78,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for IpBlockTask {
                 .res
                 .set(brs)
                 .map_err(|_| anyhow!("Someone already set a BidResponseState!"))?;
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::IpDatacenter)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             span.record("ip_block_reason", "high_risk");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "high_risk_ip");

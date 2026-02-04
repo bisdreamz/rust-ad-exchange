@@ -1,4 +1,4 @@
-use crate::app::pipeline::ortb::context::AuctionContext;
+use crate::app::pipeline::ortb::context::{AuctionContext, PublisherBlockReason};
 use crate::app::pipeline::ortb::telemetry;
 use crate::core::enrichment::device::{DeviceLookup, DeviceType};
 use anyhow::{Error, anyhow};
@@ -60,6 +60,11 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
                 .set(brs)
                 .expect("Someone already set a BidResponseState!");
 
+            context
+                .block_reason
+                .set(PublisherBlockReason::DeviceUnknown)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
             span.record("dev_lookup_result", "no_ua_result");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_unknown");
 
@@ -79,6 +84,11 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
                 .res
                 .set(brs)
                 .expect("Someone already set a BidResponseState!");
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::DeviceBot)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             span.record("dev_lookup_result", "bot");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_bot");

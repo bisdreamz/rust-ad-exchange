@@ -1,5 +1,7 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{BidContext, BidResponseContext, BidderResponseState};
+use crate::app::pipeline::ortb::context::{
+    BidContext, BidResponseContext, BidderResponseState, PublisherBlockReason,
+};
 use crate::core::demand::notifications::{DemandNotificationsCache, NoticeUrls};
 use crate::core::events;
 use crate::core::events::{billing, macros};
@@ -244,6 +246,11 @@ impl NotificationsUrlInjectionTask {
                 .res
                 .set(brs)
                 .map_err(|_| anyhow!("Failed to attach failed adm processing reason on ctx"))?;
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::BidsProcessingError)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             bail!("Every bid received failed to inject bid macros and event handlers");
         }

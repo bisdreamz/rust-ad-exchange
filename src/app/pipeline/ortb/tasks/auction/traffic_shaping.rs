@@ -1,15 +1,15 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext, CalloutSkipReason};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext, CalloutSkipReason};
 use crate::core::managers::ShaperManager;
 use crate::core::shaping::tree::ShapingDecision;
 use anyhow::Error;
 use async_trait::async_trait;
 use opentelemetry::metrics::{Counter, Gauge, Histogram};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use std::sync::{Arc, LazyLock};
-use tracing::{debug, warn, Instrument};
+use tracing::{Instrument, debug, warn};
 
 static COUNTER_SHAPING_OUTCOMES: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex:demand:shaping")

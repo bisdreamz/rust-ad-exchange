@@ -1,10 +1,10 @@
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use tracing::{debug, trace, warn, Instrument};
+use tracing::{Instrument, debug, trace, warn};
 
 fn expand_requests(callouts: Vec<BidderCallout>) -> Vec<BidderCallout> {
     if callouts.len() == 1 && callouts.first().unwrap().req.imp.len() == 1 {
@@ -137,8 +137,8 @@ impl AsyncTask<AuctionContext, Error> for MultiImpBreakoutTask {
 mod tests {
     use super::*;
     use crate::core::models::bidder::Endpoint;
-    use rtb::bid_request::ImpBuilder;
     use rtb::BidRequestBuilder;
+    use rtb::bid_request::ImpBuilder;
     use std::sync::{Arc, OnceLock};
 
     fn create_test_endpoint() -> Arc<Endpoint> {
@@ -317,6 +317,7 @@ mod tests {
                 req: callout_req,
                 ..Default::default()
             }],
+            ..Default::default()
         };
 
         expand_bidder(&mut bidder_context);

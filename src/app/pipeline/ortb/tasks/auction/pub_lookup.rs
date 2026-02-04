@@ -1,3 +1,4 @@
+use crate::app::pipeline::ortb::context::PublisherBlockReason;
 use crate::app::pipeline::ortb::{AuctionContext, telemetry};
 use crate::core::managers::PublisherManager;
 use crate::core::models::publisher::Publisher;
@@ -39,12 +40,19 @@ fn record_and_bail_if_disabled(
 ) -> Result<(), Error> {
     let parent_span = Span::current();
 
+    let _req = context.req.read();
+
     if !publisher.enabled {
         let brs = BidResponseState::NoBidReason {
             reqid: context.original_auction_id.clone(),
             nbr: nobidreasons::SELLER_DISABLED,
             desc: Some("Publisher account has been disabled"),
         };
+
+        context
+            .block_reason
+            .set(PublisherBlockReason::DisabledSeller)
+            .map_err(|_| anyhow!("Failed to attach disabled pub reason on ctx"))?;
 
         context
             .res
@@ -81,6 +89,11 @@ impl PubLookupTask {
             nbr: nobidreasons::UNKNOWN_SELLER,
             desc: Some("Publisher id unrecognized"),
         };
+
+        context
+            .block_reason
+            .set(PublisherBlockReason::UnknownSeller)
+            .map_err(|_| anyhow!("Failed to attach unkown pub reason on ctx"))?;
 
         context
             .res

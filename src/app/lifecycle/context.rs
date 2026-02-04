@@ -7,6 +7,8 @@ use crate::core::cluster::ClusterDiscovery;
 use crate::core::demand::notifications::DemandNotificationsCache;
 use crate::core::enrichment::device::DeviceLookup;
 use crate::core::filters::bot::IpRiskFilter;
+use crate::core::firestore::counters::demand::DemandCounterStore;
+use crate::core::firestore::counters::publisher::PublisherCounterStore;
 use crate::core::managers::{DemandManager, PublisherManager, ShaperManager};
 use crate::core::observability::ObservabilityProviders;
 use crate::core::usersync::SyncStore;
@@ -42,8 +44,14 @@ pub struct StartupContext {
     pub sync_store: OnceLock<Arc<dyn SyncStore>>,
     /// Responsible for observing cluster sizing changes
     pub cluster_manager: OnceLock<Arc<dyn ClusterDiscovery>>,
-    /// Optional Firestore client, if configured
+    /// Optional Firestore client, if configured. oncelock should
+    /// always be set to catch accidential pipeline configurations
+    /// leading to inactive database tasks
     pub firestore: OnceLock<Option<Arc<FirestoreDb>>>,
+    /// Optional pub specific activity counters to persist to firestore
+    pub counters_pub_store: OnceLock<Option<Arc<PublisherCounterStore>>>,
+    /// Optional demand specific activity counters to persist to firestore
+    pub counters_demand_store: OnceLock<Option<Arc<DemandCounterStore>>>,
 
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline

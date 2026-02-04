@@ -10,6 +10,7 @@ use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
+use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -120,12 +121,12 @@ impl QpslimiterTask {
         match rl.check().is_err() {
             false => {
                 debug!("Endpoint passed QPS limiter");
-                span.record("qps_passed", false);
+                span.record("qps_passed", true);
                 false
             }
             true => {
                 debug!("Endpoint failed QPS limiter");
-                span.record("qps_passed", true);
+                span.record("qps_passed", false);
                 true
             }
         }
@@ -138,10 +139,29 @@ impl QpslimiterTask {
 
         let mut total_callouts = 0;
         let mut callouts_passed = 0;
+
         for bidder_context in bidder_contexts.iter() {
-            for callout in bidder_context.callouts.iter() {
-                if callout.skip_reason.get().is_some() {
-                    continue; // someone already blocked this guy
+            let mut order: SmallVec<[&BidderCallout; 20]> = bidder_context
+                .callouts
+                .iter()
+                .filter(|c| c.skip_reason.get().is_none())
+                .collect();
+
+            if order.is_empty() {
+                continue;
+            }
+
+            fastrand::shuffle(&mut order);
+
+            // try endpoints in shuffled order, first to pass qps wins
+            let mut found_one = false;
+            for callout in &order {
+                if found_one {
+                    callout
+                        .skip_reason
+                        .set(CalloutSkipReason::EndpointRotation)
+                        .unwrap_or_else(|_| warn!("Failed setting rotation skip reason"));
+                    continue;
                 }
 
                 total_callouts += 1;
@@ -158,8 +178,8 @@ impl QpslimiterTask {
                     continue;
                 }
 
+                found_one = true;
                 callouts_passed += 1;
-
                 debug!("Endpoint {} passed QPS limiter", &callout.endpoint.name);
             }
         }

@@ -1,6 +1,7 @@
 pub mod bidders_load;
 pub mod cluster;
 pub mod config_load;
+pub mod counter_stores;
 pub mod demand_url_cache;
 pub mod device_load;
 pub mod event_pipeline;

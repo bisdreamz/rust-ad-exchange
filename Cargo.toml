@@ -24,7 +24,7 @@ rust-device-detector = { git = "https://github.com/simplecastapps/rust-device-de
 fast_uaparser = "2.0.1"
 moka = { version = "0.12.11", features = ["sync"] }
 ip_network_table = "0.2.0"
-reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "http2", "gzip", "deflate", "hickory-dns"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["rustls", "http2", "gzip", "deflate", "hickory-dns"] }
 arc-swap = "1.7.1"
 ip_network = "0.4.1"
 tracing = { version = "0.1.41", features = ["async-await", "log"] }
@@ -54,8 +54,12 @@ mimalloc = "0.1.48"
 derivative = "2.2.0"
 humantime-serde = "1.1.1"
 firestore = "0.47.1"
+dashmap = "6.1.0"
+chrono = "0.4.43"
+fastrand = "2.3.0"
 
 [profile.release]
+opt-level = 3
 debug = 0
 strip = true
 panic = "abort"

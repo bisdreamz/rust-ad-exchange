@@ -1,5 +1,6 @@
 use crate::app::lifecycle::context::StartupContext;
 use crate::app::lifecycle::shutdown::tasks::stop_server::StopServerTask;
+use crate::app::shutdown::tasks::flush_counters::FlushCountersTask;
 use crate::app::shutdown::tasks::observability::ObservabilityShutdownTask;
 use crate::app::span::WrappedPipelineTask;
 use pipeline::{Pipeline, PipelineBuilder};
@@ -10,6 +11,7 @@ use tracing::info_span;
 pub fn build_shutdown_pipeline() -> Pipeline<StartupContext, anyhow::Error> {
     let shutdown_pipeline = PipelineBuilder::new()
         .with_async(Box::new(StopServerTask))
+        .with_async(Box::new(FlushCountersTask))
         .with_async(Box::new(ObservabilityShutdownTask))
         .build()
         .expect("Shutdown pipeline should have tasks!");

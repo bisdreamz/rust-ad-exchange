@@ -79,6 +79,7 @@ impl LocalIdentityTask {
             if let Some(user) = req.user.as_mut() {
                 if !&user.buyeruid.is_empty() {
                     debug!("What the heck, buyeruid value on app req? Clearing!");
+
                     user.buyeruid.clear();
                 }
             }

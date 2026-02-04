@@ -109,6 +109,7 @@ pub struct BidderResponse {
 pub enum CalloutSkipReason {
     TrafficShaping,
     QpsLimit,
+    EndpointRotation,
 }
 
 /// The ['DataUrl'] notification events are sent to,
@@ -164,6 +165,22 @@ pub struct IdentityContext {
     // later, ramp ids or.. whatever
 }
 
+#[derive(Debug, Clone, PartialEq, EnumString, AsRefStr, Display)]
+pub enum PublisherBlockReason {
+    UnknownSeller,
+    DisabledSeller,
+    IpInvalid,
+    IpDatacenter,
+    DeviceUnknown,
+    DeviceBot,
+    TooManyHops,
+    BidsProcessingError,
+    MissingAuctionId,
+    MissingDevice,
+    MissingDeviceUa,
+    MissingAppSite,
+}
+
 /// Top level auction context object which carries all context required
 /// to fullfill a request pipeline
 ///
@@ -194,6 +211,10 @@ pub struct AuctionContext {
     pub req: RwLock<BidRequest>,
     pub res: OnceLock<BidResponseState>,
     pub bidders: tokio::sync::Mutex<Vec<BidderContext>>,
+    /// Reason we may have blocked this publisher request
+    /// from reaching auction, so we may persist these
+    /// stats as individually reportable
+    pub block_reason: OnceLock<PublisherBlockReason>,
 }
 
 impl AuctionContext {

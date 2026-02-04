@@ -1,4 +1,5 @@
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::context::PublisherBlockReason;
 use anyhow::anyhow;
 use pipeline::BlockingTask;
 use rtb::child_span_info;
@@ -34,6 +35,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
                 .set(brs)
                 .expect("Should not have response state assigned already");
 
+            context
+                .block_reason
+                .set(PublisherBlockReason::MissingAuctionId)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
             span.record("invalid_reason", "missing_auction_id");
 
             return Err(anyhow!("Auction missing id value"));
@@ -51,6 +57,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
                 .res
                 .set(brs)
                 .expect("Should not have response state assigned already");
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::MissingDevice)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             span.record("invalid_reason", "missing_device_object");
 
@@ -70,6 +81,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
                 .res
                 .set(brs)
                 .expect("Should not have response state assigned already");
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::MissingDeviceUa)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             span.record("invalid_reason", "missing_user_agent");
 
@@ -104,6 +120,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
                 .res
                 .set(brs)
                 .expect("Should not have response state assigned already");
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::MissingAppSite)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
             span.record("invalid_reason", "missing_app_site");
 
