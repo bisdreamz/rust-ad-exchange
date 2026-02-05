@@ -13,6 +13,7 @@ pub struct DemandCounters {
     pub requests_shaping_blocked: u64,
     pub auctions: u64,
     pub bids: u64,
+    pub bids_filtered: u64,
     pub timeouts: u64,
     pub errors: u64,
     pub impressions: u64,
@@ -41,6 +42,10 @@ impl DemandCounters {
         self.bids += 1;
     }
 
+    pub fn bid_filtered(&mut self) {
+        self.bids_filtered += 1;
+    }
+
     pub fn timeout(&mut self) {
         self.timeouts += 1;
     }
@@ -63,6 +68,7 @@ impl CounterBuffer for DemandCounters {
         self.requests_shaping_blocked += other.requests_shaping_blocked;
         self.auctions += other.auctions;
         self.bids += other.bids;
+        self.bids_filtered += other.bids_filtered;
         self.timeouts += other.timeouts;
         self.errors += other.errors;
         self.impressions += other.impressions;
@@ -83,6 +89,7 @@ impl CounterBuffer for DemandCounters {
             ),
             ("auctions", CounterValue::Int(self.auctions)),
             ("bids", CounterValue::Int(self.bids)),
+            ("bids_filtered", CounterValue::Int(self.bids_filtered)),
             ("timeouts", CounterValue::Int(self.timeouts)),
             ("errors", CounterValue::Int(self.errors)),
             ("impressions", CounterValue::Int(self.impressions)),

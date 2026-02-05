@@ -1,38 +1,12 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{
-    BidderCallout, BidderContext, BidderResponseState, CalloutSkipReason, IdentityContext,
-};
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderResponseState, CalloutSkipReason};
 use crate::core::firestore::counters::demand::{DemandCounterStore, DemandCounters};
-use crate::core::firestore::counters::publisher::{PublisherCounterStore, PublisherCounters};
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
-use rtb::bid_request::{Device, DistributionchannelOneof};
-use rtb::{BidRequest, child_span_info};
-use smallvec::SmallVec;
+use rtb::child_span_info;
 use std::sync::Arc;
 use tracing::Instrument;
-
-fn get_auction_stats(bidder_contexts: &Vec<BidderContext>) -> (u32, u32) {
-    let mut auctions = 0u32;
-    let mut bids = 0u32;
-
-    for bidder_context in bidder_contexts {
-        for callout in &bidder_context.callouts {
-            if callout.skip_reason.get().is_none() {
-                auctions += 1;
-
-                if let Some(response) = callout.response.get().as_ref() {
-                    if matches!(response.state, BidderResponseState::Bid(_)) {
-                        bids += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    (auctions, bids)
-}
 
 fn build_endpoint_counters(bidder_callout: &BidderCallout) -> Result<DemandCounters, Error> {
     let mut counters = DemandCounters::default();
@@ -44,12 +18,22 @@ fn build_endpoint_counters(bidder_callout: &BidderCallout) -> Result<DemandCount
             counters.auction();
 
             if let Some(response) = bidder_callout.response.get().as_ref() {
-                match response.state {
+                match &response.state {
                     BidderResponseState::Timeout => counters.timeout(),
                     BidderResponseState::Error(_) => counters.error(),
                     BidderResponseState::Unknown(_, _) => counters.error(),
                     BidderResponseState::NoBid(_) => {}
-                    BidderResponseState::Bid(_) => counters.bid(),
+                    BidderResponseState::Bid(bid_ctx) => {
+                        bid_ctx.seatbids.iter().for_each(|seat| {
+                            for bid_ctx in &seat.bids {
+                                counters.bid();
+
+                                if bid_ctx.filter_reason.is_some() {
+                                    counters.bid_filtered();
+                                }
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -87,6 +71,7 @@ impl DemandCountersTask {
             let mut bidder_had_any_matches = false;
             let mut bidder_auctions = 0;
             let mut bidder_bids = 0;
+            let mut bidder_bids_filtered = 0;
             let mut bidder_timeouts = 0;
             let mut bidder_errors = 0;
 
@@ -103,6 +88,7 @@ impl DemandCountersTask {
                 bidder_had_any_matches |= counters.requests_matched > 0;
                 bidder_auctions += counters.auctions;
                 bidder_bids += counters.bids;
+                bidder_bids_filtered += counters.bids_filtered;
                 bidder_timeouts += counters.timeouts;
                 bidder_errors += counters.errors;
             }
@@ -111,6 +97,7 @@ impl DemandCountersTask {
                 requests_matched: bidder_had_any_matches as u64,
                 auctions: bidder_auctions,
                 bids: bidder_bids,
+                bids_filtered: bidder_bids_filtered,
                 timeouts: bidder_timeouts,
                 errors: bidder_errors,
                 ..Default::default()

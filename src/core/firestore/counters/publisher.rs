@@ -1,6 +1,7 @@
 use crate::core::firestore::counters::store::CounterStore;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
 use firestore::FirestoreDb;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ pub struct PublisherCounters {
     req_tmax_sum: u64,
     auctions: u64,
     bids: u64,
+    bids_filtered: u64,
     impressions: u64,
     revenue_micros: u64,
     cost_micros: u64,
@@ -63,6 +65,12 @@ impl PublisherCounters {
         self.bids += count;
     }
 
+    /// Mark count of bids that were
+    /// filtered e.g. blocked adomain, belowfloor
+    pub fn bids_filtered(&mut self, count: u64) {
+        self.bids_filtered += count;
+    }
+
     /// Increment impression counters and record revenue
     pub fn impression(&mut self, revenue_cpm: f64, cost_cpm: f64) {
         self.impressions += 1;
@@ -81,6 +89,7 @@ impl CounterBuffer for PublisherCounters {
         self.req_tmax_sum += other.req_tmax_sum;
         self.auctions += other.auctions;
         self.bids += other.bids;
+        self.bids_filtered += other.bids_filtered;
         self.impressions += other.impressions;
         self.revenue_micros += other.revenue_micros;
         self.cost_micros += other.cost_micros;
@@ -102,6 +111,7 @@ impl CounterBuffer for PublisherCounters {
             ("req_tmax_sum", CounterValue::Int(self.req_tmax_sum)),
             ("auctions", CounterValue::Int(self.auctions)),
             ("bids", CounterValue::Int(self.bids)),
+            ("bids_filtered", CounterValue::Int(self.bids_filtered)),
             ("impressions", CounterValue::Int(self.impressions)),
             (
                 "revenue_cpm_sum",
@@ -149,14 +159,15 @@ impl PublisherCounterStore {
         &self,
         pub_id: &str,
         pub_name: &str,
-        ad_formats: &[&str],
-        buffer: &PublisherCounters,
+        aggregate: &PublisherCounters,
+        by_format: &HashMap<&str, PublisherCounters>,
     ) {
-        for ad_format in ad_formats {
-            self.by_format.merge(&[pub_id, pub_name, ad_format], buffer);
-        }
+        self.by_pub.merge(&[pub_id, pub_name], aggregate);
 
-        self.by_pub.merge(&[pub_id, pub_name], buffer);
+        for (ad_format, counters) in by_format {
+            self.by_format
+                .merge(&[pub_id, pub_name, ad_format], counters);
+        }
     }
 
     /// Close and flush counters
