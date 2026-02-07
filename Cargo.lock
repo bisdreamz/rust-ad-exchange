@@ -3465,6 +3465,7 @@ dependencies = [
  "reqwest 0.13.1",
  "rtb-runtime",
  "rust-device-detector",
+ "rustls",
  "serde",
  "serde_json",
  "smallvec",

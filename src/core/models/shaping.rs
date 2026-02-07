@@ -14,7 +14,7 @@ pub enum Metric {
     BidRate,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, EnumString, AsRefStr, Display)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, EnumString, AsRefStr, Display)]
 #[serde(rename_all = "snake_case")]
 pub enum ShapingFeature {
     PubId,

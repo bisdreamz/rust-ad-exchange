@@ -150,6 +150,18 @@ impl DemandCounterStore {
             .merge(&[bidder_id, bidder_name, endpoint], buffer);
     }
 
+    pub fn merge_impression(
+        &self,
+        bidder_id: &str,
+        bidder_name: &str,
+        endpoint: &str,
+        buffer: &DemandCounters,
+    ) {
+        self.by_bidder.merge(&[bidder_id, bidder_name], buffer);
+        self.by_endpoint
+            .merge(&[bidder_id, bidder_name, endpoint], buffer);
+    }
+
     pub async fn shutdown(&self) {
         self.by_bidder.shutdown().await;
         self.by_endpoint.shutdown().await;

@@ -17,12 +17,16 @@ impl BlockingTask<StartupContext, Error> for ShapersManagerLoadTask {
             .get()
             .ok_or_else(|| anyhow!("Bidder manager not initialized, cant setup shaping"))?;
 
-        let shaper_manager = ShaperManager::new(bidder_manager)
-            .map_err(|e| anyhow!("Failed loading shaping manager: {:?}", e))?;
+        let shaper_manager = Arc::new(
+            ShaperManager::new(bidder_manager)
+                .map_err(|e| anyhow!("Failed loading shaping manager: {:?}", e))?,
+        );
+
+        ShaperManager::register_demand_listener(shaper_manager.clone(), bidder_manager);
 
         context
             .shaping_manager
-            .set(Arc::new(shaper_manager))
+            .set(shaper_manager)
             .map_err(|_| anyhow!("Can't set shaping on context, exist already?"))?;
 
         debug!("Attached shaping manager to startup context");

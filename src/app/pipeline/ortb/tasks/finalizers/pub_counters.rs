@@ -5,24 +5,27 @@ use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::bid_request::{Device, DistributionchannelOneof, Imp};
-use rtb::{BidRequest, child_span_info};
+use rtb::{BidRequest, child_span_info, utils};
+use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::Instrument;
 
-/// Determine the primary format for an imp (priority: video > banner > native > audio)
-fn imp_format(imp: &Imp) -> Option<&'static str> {
-    if imp.video.is_some() {
-        Some("video")
-    } else if imp.banner.is_some() {
-        Some("banner")
-    } else if imp.native.is_some() {
-        Some("native")
-    } else if imp.audio.is_some() {
-        Some("audio")
-    } else {
-        None
+fn imp_formats(imp: &Imp) -> SmallVec<[&'static str; 4]> {
+    let mut formats = SmallVec::new();
+    if imp.banner.is_some() {
+        formats.push("banner");
     }
+    if imp.video.is_some() {
+        formats.push("video");
+    }
+    if imp.native.is_some() {
+        formats.push("native");
+    }
+    if imp.audio.is_some() {
+        formats.push("audio");
+    }
+    formats
 }
 
 fn identity_has_cookie(identity: Option<&IdentityContext>) -> bool {
@@ -44,26 +47,19 @@ fn has_cookie_or_maid(request: &BidRequest, identity: Option<&IdentityContext>) 
     }
 }
 
-/// Build aggregate and per-format counters with proper bid attribution
 fn build_counters_from_request(
     request: &BidRequest,
     identity: Option<&IdentityContext>,
     is_blocked: bool,
-) -> (
-    PublisherCounters,
-    HashMap<&'static str, PublisherCounters>,
-    HashMap<String, &'static str>,
-) {
+) -> (PublisherCounters, HashMap<&'static str, PublisherCounters>) {
     let mut aggregate = PublisherCounters::default();
-    let mut imp_formats: HashMap<String, &'static str> = HashMap::new();
     let mut format_imp_counts: HashMap<&'static str, u64> = HashMap::new();
     let tmax = request.tmax as u64;
     let has_identity = has_cookie_or_maid(request, identity);
 
-    // first pass count imps per format and build impid->format mapping
+    // count imps per format - an imp with multiple formats counts toward each
     for imp in &request.imp {
-        if let Some(format) = imp_format(imp) {
-            imp_formats.insert(imp.id.clone(), format);
+        for format in imp_formats(imp) {
             *format_imp_counts.entry(format).or_default() += 1;
         }
     }
@@ -78,7 +74,7 @@ fn build_counters_from_request(
         aggregate.block();
     }
 
-    // build per-format counters with correct imp stats
+    // build per-format counters with correct imp counts
     let mut by_format: HashMap<&'static str, PublisherCounters> = HashMap::new();
     for (format, imp_count) in format_imp_counts {
         let mut fc = PublisherCounters::default();
@@ -94,14 +90,12 @@ fn build_counters_from_request(
         by_format.insert(format, fc);
     }
 
-    (aggregate, by_format, imp_formats)
+    (aggregate, by_format)
 }
 
-/// Add auction/bid stats to counters, attributing bids to their format
 fn add_auction_stats(
     aggregate: &mut PublisherCounters,
     by_format: &mut HashMap<&'static str, PublisherCounters>,
-    imp_formats: &HashMap<String, &'static str>,
     bidders: &[BidderContext],
 ) {
     let mut total_auctions = 0u64;
@@ -117,10 +111,9 @@ fn add_auction_stats(
 
             total_auctions += 1;
 
-            // count auction per format (dedupe - one auction per format per callout)
             let mut callout_formats: HashSet<&'static str> = HashSet::new();
             for imp in &callout.req.imp {
-                if let Some(&format) = imp_formats.get(imp.id.as_str()) {
+                for format in imp_formats(imp) {
                     callout_formats.insert(format);
                 }
             }
@@ -139,11 +132,9 @@ fn add_auction_stats(
                                 total_bids_filtered += 1;
                             }
 
-                            // attribute bid to its applicable format
-                            if let Some(&format) = imp_formats.get(bid_ctx.bid.impid.as_str()) {
-                                if let Some(fc) = by_format.get_mut(format) {
+                            if let Some(ad_format) = utils::detect_ad_format(&bid_ctx.bid) {
+                                if let Some(fc) = by_format.get_mut(ad_format.as_str()) {
                                     fc.bid(1);
-
                                     if filtered {
                                         fc.bids_filtered(1);
                                     }
@@ -161,7 +152,7 @@ fn add_auction_stats(
         aggregate.auction(total_auctions);
         aggregate.bid(total_bids);
         aggregate.bids_filtered(total_bids_filtered);
-        
+
         for (format, count) in format_auctions {
             if let Some(fc) = by_format.get_mut(format) {
                 fc.request_auctioned();
@@ -194,14 +185,14 @@ impl PubCountersTask {
 
         let is_blocked = context.block_reason.get().is_some();
 
-        let (mut aggregate, mut by_format, imp_formats) = {
+        let (mut aggregate, mut by_format) = {
             let request = context.req.read();
             build_counters_from_request(&request, context.identity.get(), is_blocked)
         };
 
         if !is_blocked {
             let bidders = context.bidders.lock().await;
-            add_auction_stats(&mut aggregate, &mut by_format, &imp_formats, &bidders);
+            add_auction_stats(&mut aggregate, &mut by_format, &bidders);
         }
 
         self.pub_store.merge(

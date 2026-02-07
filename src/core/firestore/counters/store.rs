@@ -5,10 +5,10 @@ use std::time::Duration;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
-use firestore::FirestoreDb;
+use firestore::{FirestoreBatch, FirestoreDb, FirestoreSimpleBatchWriter};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use tracing::debug;
+use tracing::{debug, error};
 
 fn bucket_key(bucket_width: Duration) -> (DateTime<Utc>, String) {
     let now = Utc::now();
@@ -30,7 +30,11 @@ fn bucket_key(bucket_width: Duration) -> (DateTime<Utc>, String) {
 #[derive(Serialize, Deserialize)]
 struct CounterDoc {
     fields: HashMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "firestore::serialize_as_optional_timestamp::serialize",
+        deserialize_with = "firestore::serialize_as_optional_timestamp::deserialize"
+    )]
     bucket: Option<DateTime<Utc>>,
     stats: HashMap<String, usize>,
 }
@@ -115,6 +119,63 @@ impl<C: CounterBuffer> CounterStore<C> {
             .merge(buffer);
     }
 
+    fn merge_back(&self, key: String, values: Vec<String>, buffer: C) {
+        self.entries
+            .entry(key)
+            .or_insert_with(|| CounterEntry {
+                values,
+                counters: C::default(),
+            })
+            .counters
+            .merge(&buffer);
+    }
+
+    async fn commit_batch(
+        &self,
+        batch: FirestoreBatch<'_, FirestoreSimpleBatchWriter>,
+        pending_docs: &mut HashMap<String, (String, Vec<String>, C)>,
+    ) {
+        if batch.writes.is_empty() {
+            return;
+        }
+
+        match batch.write().await {
+            Ok(resp) => {
+                let mut has_error = false;
+
+                if resp.statuses.is_empty() || resp.statuses.len() != pending_docs.len() {
+                    has_error = true;
+                    error!("batch write mismatched status count");
+                }
+
+                for (idx, status) in resp.statuses.iter().enumerate() {
+                    if status.code != 0 {
+                        has_error = true;
+                        error!(
+                            "batch write failed at index {}: code={} message={}",
+                            idx, status.code, status.message
+                        );
+                    }
+                }
+                // On success we drop pending_docs; on partial errors Firestore does not
+                // identify which write failed, so merge everything back to be safe.
+                if has_error {
+                    for (_doc_id, (key, values, buffer)) in pending_docs.drain() {
+                        self.merge_back(key, values, buffer);
+                    }
+                } else {
+                    pending_docs.clear();
+                }
+            }
+            Err(e) => {
+                error!("batch write failed: {e}");
+                for (_doc_id, (key, values, buffer)) in pending_docs.drain() {
+                    self.merge_back(key, values, buffer);
+                }
+            }
+        }
+    }
+
     /// Flush all entries to Firestore. Each becomes a single
     /// update+transform: object sets fields/bucket via mask,
     /// transforms increment stats.* server-side.
@@ -150,6 +211,20 @@ impl<C: CounterBuffer> CounterStore<C> {
             })
             .collect();
 
+        let writer = match self.db.create_simple_batch_writer().await {
+            Ok(writer) => writer,
+            Err(e) => {
+                error!("failed to create batch writer: {e}");
+                for (key, values, buffer) in taken {
+                    self.merge_back(key, values, buffer);
+                }
+                return;
+            }
+        };
+
+        let mut batch = writer.new_batch();
+        let mut pending_docs: HashMap<String, (String, Vec<String>, C)> = HashMap::new();
+
         for (key, values, buffer) in taken {
             let pairs = buffer.counter_pairs();
 
@@ -181,6 +256,8 @@ impl<C: CounterBuffer> CounterStore<C> {
                 mask.push("bucket");
             }
 
+            pending_docs.insert(doc_id.clone(), (key.clone(), values.clone(), buffer));
+
             let result = self
                 .db
                 .fluent()
@@ -197,24 +274,31 @@ impl<C: CounterBuffer> CounterStore<C> {
                         CounterValue::Float(f) => t.field(format!("stats.{name}")).increment(*f),
                     }))
                 })
-                .execute::<serde_json::Value>()
-                .await;
+                .add_to_batch(&mut batch);
 
-            if let Err(e) = result {
-                tracing::error!(
-                    %key, %doc_id, error = %e,
-                    "failed to flush counters, merging back"
-                );
-                self.entries
-                    .entry(key)
-                    .or_insert_with(|| CounterEntry {
-                        values,
-                        counters: C::default(),
-                    })
-                    .counters
-                    .merge(&buffer);
+            match result {
+                Ok(_) => {
+                    // Firestore hard limit is 500 writes per batch; we stay well under it.
+                    // NOTE: This batching is also a workaround for firestore crate 0.47.1
+                    // dropping transforms when using .execute(); add_to_batch preserves
+                    // the stats increments.
+                    if batch.writes.len() >= 100 {
+                        let batch_to_write = batch;
+                        self.commit_batch(batch_to_write, &mut pending_docs).await;
+                        batch = writer.new_batch();
+                    }
+                }
+                Err(e) => {
+                    error!("failed to queue counter write for doc_id={doc_id}: {e}");
+                    if let Some((key, values, buffer)) = pending_docs.remove(&doc_id) {
+                        self.merge_back(key, values, buffer);
+                    }
+                }
             }
         }
+
+        // Flush any remaining writes.
+        self.commit_batch(batch, &mut pending_docs).await;
     }
 
     /// Shutdown update timer and flush

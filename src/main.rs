@@ -15,6 +15,10 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[actix_web::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let startup_pipeline = build_start_pipeline("rex.yaml".into());
     let startup_ctx = StartupContext {
         server: OnceLock::new(),

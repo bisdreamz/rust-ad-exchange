@@ -1,6 +1,7 @@
 use crate::core::firestore::counters::store::CounterStore;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
 use firestore::FirestoreDb;
+use rtb::utils::adm::AdFormat;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -168,6 +169,18 @@ impl PublisherCounterStore {
             self.by_format
                 .merge(&[pub_id, pub_name, ad_format], counters);
         }
+    }
+
+    pub fn merge_impression(
+        &self,
+        pub_id: &str,
+        pub_name: &str,
+        format: AdFormat,
+        counters: &PublisherCounters,
+    ) {
+        self.by_pub.merge(&[pub_id, pub_name], counters);
+        self.by_format
+            .merge(&[pub_id, pub_name, format.as_str()], counters);
     }
 
     /// Close and flush counters

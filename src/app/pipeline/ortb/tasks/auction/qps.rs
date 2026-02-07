@@ -1,12 +1,13 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, CalloutSkipReason};
 use crate::core::cluster::ClusterDiscovery;
-use crate::core::managers::DemandManager;
+use crate::core::managers::{DemandChange, DemandManager};
+use crate::core::models::bidder::Endpoint;
 use crate::core::spec::nobidreasons;
 use anyhow::{Error, anyhow, bail};
-use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
+use parking_lot::RwLock;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
@@ -16,31 +17,102 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use tracing::{Instrument, Span, debug, trace, warn};
 
+fn create_limiter(endpoint: &Endpoint, cluster_sz: usize) -> Option<DefaultDirectRateLimiter> {
+    if endpoint.qps < 1 {
+        debug!("Endpoint {} QPS limit: None", endpoint.name);
+        None
+    } else {
+        let local_qps = (endpoint.qps / cluster_sz).max(1);
+        debug!(
+            "Endpoint {} QPS limit: {} ({} effective locally)",
+            endpoint.name, endpoint.qps, local_qps
+        );
+        Some(RateLimiter::direct(Quota::per_second(
+            NonZeroU32::new(local_qps as u32).unwrap(),
+        )))
+    }
+}
+
 /// Responsible for enforcing QPS limits per endpoint,
 /// for callouts which do not already have a skip_reason assigned
 pub struct QpslimiterTask {
-    endpoints: Arc<ArcSwap<HashMap<String, Option<DefaultDirectRateLimiter>>>>,
+    endpoints: Arc<RwLock<HashMap<String, Option<DefaultDirectRateLimiter>>>>,
 }
 
 impl QpslimiterTask {
     pub fn new(bidder_manager: Arc<DemandManager>, cluster: Arc<dyn ClusterDiscovery>) -> Self {
         let endpoint_limiters = Self::rebuild_limiters_map(&bidder_manager, cluster.cluster_size());
+        let endpoints = Arc::new(RwLock::new(endpoint_limiters));
 
-        let endpoints = Arc::new(ArcSwap::from_pointee(endpoint_limiters));
-
-        let endpoints_clone = endpoints.clone();
-        let bidder_manager_clone = bidder_manager.clone();
-
+        // Cluster size change -> full rebuild
+        let endpoints_ref = endpoints.clone();
+        let bidder_manager_ref = bidder_manager.clone();
         cluster.on_change(Box::new(move |cluster_sz| {
             debug!(
                 "Cluster size changed to {}, rebuilding QPS limiters map",
                 cluster_sz
             );
-
             let new_limiters =
-                QpslimiterTask::rebuild_limiters_map(&bidder_manager_clone, cluster_sz);
+                QpslimiterTask::rebuild_limiters_map(&bidder_manager_ref, cluster_sz);
+            *endpoints_ref.write() = new_limiters;
+        }));
 
-            endpoints_clone.store(Arc::new(new_limiters));
+        // Demand change -> incremental update
+        let endpoints_ref = endpoints.clone();
+        let cluster_ref = cluster.clone();
+        bidder_manager.on_change(Box::new(move |change| {
+            let cluster_sz = cluster_ref.cluster_size();
+            let mut map = endpoints_ref.write();
+
+            match change {
+                DemandChange::Added {
+                    endpoints: new_eps, ..
+                } => {
+                    for ep in new_eps {
+                        if !ep.enabled {
+                            continue;
+                        }
+                        debug!("Adding QPS limiter for new endpoint {}", ep.name);
+                        map.insert(ep.name.clone(), create_limiter(ep, cluster_sz));
+                    }
+                }
+                DemandChange::Modified {
+                    endpoints: new_eps,
+                    prev_endpoints,
+                    ..
+                } => {
+                    for prev_ep in prev_endpoints {
+                        if !new_eps.iter().any(|e| e.name == prev_ep.name && e.enabled) {
+                            debug!("Removing QPS limiter for endpoint {}", prev_ep.name);
+                            map.remove(&prev_ep.name);
+                        }
+                    }
+                    for ep in new_eps {
+                        if !ep.enabled {
+                            map.remove(&ep.name);
+                            continue;
+                        }
+                        let prev_qps = prev_endpoints
+                            .iter()
+                            .find(|p| p.name == ep.name)
+                            .map(|p| p.qps);
+                        if prev_qps != Some(ep.qps) {
+                            debug!(
+                                "Endpoint {} QPS changed {:?} -> {}, recreating limiter",
+                                ep.name, prev_qps, ep.qps
+                            );
+                            map.insert(ep.name.clone(), create_limiter(ep, cluster_sz));
+                        }
+                    }
+                }
+                DemandChange::Removed { bidder_id, prev_endpoints } => {
+                    for ep in prev_endpoints {
+                        debug!("Bidder {} deleted, removing QPS limiter for endpoint {}",
+                            bidder_id, ep.name);
+                        map.remove(&ep.name);
+                    }
+                }
+            }
         }));
 
         Self { endpoints }
@@ -62,23 +134,8 @@ impl QpslimiterTask {
                     if !endpoint.enabled {
                         continue;
                     }
-
-                    let rl = if endpoint.qps < 1 {
-                        debug!("Endpoint {} QPS limit: None", endpoint.name);
-                        None
-                    } else {
-                        let local_qps = (endpoint.qps / cluster_sz).max(1);
-
-                        debug!(
-                            "Endpoint {} QPS limit: {} ({} effective locally)",
-                            endpoint.name, endpoint.qps, local_qps
-                        );
-                        Some(RateLimiter::direct(Quota::per_second(
-                            NonZeroU32::new(local_qps as u32).unwrap(),
-                        )))
-                    };
-
-                    endpoints_limiters.insert(endpoint.name.clone(), rl);
+                    endpoints_limiters
+                        .insert(endpoint.name.clone(), create_limiter(endpoint, cluster_sz));
                 }
             });
 
@@ -93,7 +150,7 @@ impl QpslimiterTask {
         )
         .entered();
 
-        let endpoints = self.endpoints.load();
+        let endpoints = self.endpoints.read();
 
         let rl_opt = match endpoints.get(&callout.endpoint.name) {
             Some(rl_opt) => rl_opt,

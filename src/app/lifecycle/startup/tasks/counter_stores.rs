@@ -37,7 +37,7 @@ impl BlockingTask<StartupContext, Error> for CounterStoresTask {
             Some(firestore) => {
                 let pub_store = PublisherCounterStore::new(
                     firestore.clone(),
-                    "stats_by_pub",
+                    "stats_pub",
                     Duration::from_hours(1),
                     Duration::from_mins(1),
                 );
@@ -50,7 +50,7 @@ impl BlockingTask<StartupContext, Error> for CounterStoresTask {
 
                 let demand_store = DemandCounterStore::new(
                     firestore.clone(),
-                    "stats_by_demand",
+                    "stats_demand",
                     Duration::from_hours(1),
                     Duration::from_mins(1),
                 );

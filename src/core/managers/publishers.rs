@@ -4,6 +4,7 @@ use anyhow::Error;
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::debug;
 
 pub struct PublisherManager {
     pubs: ArcSwap<HashMap<String, Arc<Publisher>>>,
@@ -35,12 +36,20 @@ impl PublisherManager {
 
     fn handle_event(&self, event: ProviderEvent<Publisher>) {
         match event {
-            ProviderEvent::Added(p) | ProviderEvent::Modified(p) => {
+            ProviderEvent::Added(p) => {
+                debug!("Publisher added: {}", p.id);
+                let mut map = (*self.pubs.load_full()).clone();
+                map.insert(p.id.clone(), Arc::new(p));
+                self.pubs.store(Arc::new(map));
+            }
+            ProviderEvent::Modified(p) => {
+                debug!("Publisher modified: {}", p.id);
                 let mut map = (*self.pubs.load_full()).clone();
                 map.insert(p.id.clone(), Arc::new(p));
                 self.pubs.store(Arc::new(map));
             }
             ProviderEvent::Removed(id) => {
+                debug!("Publisher removed: {}", id);
                 let mut map = (*self.pubs.load_full()).clone();
                 map.remove(&id);
                 self.pubs.store(Arc::new(map));

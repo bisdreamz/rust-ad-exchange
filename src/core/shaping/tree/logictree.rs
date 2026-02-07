@@ -12,6 +12,7 @@ use rtb::bid_response::Bid;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
 
@@ -95,14 +96,19 @@ pub struct ShapingResult {
     pub features: Vec<Feature>,
 }
 
+struct DynamicConfig {
+    metric: Metric,
+    explore_percent: u32,
+    qps_limit: u32,
+    min_threshold: f32,
+}
+
 /// A Summarizing, online learning traffic shaping implementation
 /// built atop the ['LogicTree']
 ///
 /// Learns in realtime and makes decisions based on summary parent segment nodes
 /// such until it observes enough auctions to make more specific predictions
 pub struct TreeShaper {
-    /// The target ['Metric'] (KPI) we are optimizing towwards
-    metric: Metric,
     /// The ['ShapingFeature'] set in order
     features: Vec<ShapingFeature>,
     /// The ['QpsHistogram'] which tracks available QPS and shaping value correlations,
@@ -113,8 +119,9 @@ pub struct TreeShaper {
     /// Keeps state about the current passing qps, available qps, and threshold target
     /// from the histogram cycle
     state: Arc<ArcSwap<ThresholdState>>,
-    qps_explore_percent: u32,
-    qps_limit: u32,
+    /// Dynamically updatable config (metric, explore_percent, qps_limit, min_threshold)
+    config: Arc<ArcSwap<DynamicConfig>>,
+    task_handles: Vec<JoinHandle<()>>,
 }
 
 impl TreeShaper {
@@ -133,60 +140,83 @@ impl TreeShaper {
 
         let tree = Arc::new(LogicTree::new(str_features, first_pred_handler));
         let state = Arc::new(ArcSwap::new(Arc::new(ThresholdState::default())));
+        let config = Arc::new(ArcSwap::new(Arc::new(DynamicConfig {
+            metric: metric.clone(),
+            explore_percent,
+            qps_limit,
+            min_threshold,
+        })));
 
-        info!(
-            "Starting dynamic thresholding for, have QPS limit of {}",
-            qps_limit
-        );
+        info!("Starting dynamic thresholding, QPS limit {}", qps_limit);
 
         let histogram = Arc::new(QpsHistogram::new(0.01));
 
-        let histogram_clone = histogram.clone();
-        let state_clone = state.clone();
-        let min_threshold_clone = min_threshold.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-
-            loop {
-                interval.tick().await;
-                let avail_qps = state_clone.load().qps_avail;
-                let passing_qps_budget =
-                    tree::utils::qps_budget_passing(explore_percent, qps_limit, avail_qps);
-
-                if passing_qps_budget == 0 && avail_qps > 0 {
-                    warn!(
-                        "Passing qps budget became zero but have avail QPS! This should not happen unless inactive!"
+        let h1 = {
+            let histogram = histogram.clone();
+            let state = state.clone();
+            let config = config.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    interval.tick().await;
+                    let cfg = config.load();
+                    let avail_qps = state.load().qps_avail;
+                    let passing_qps_budget = tree::utils::qps_budget_passing(
+                        cfg.explore_percent,
+                        cfg.qps_limit,
+                        avail_qps,
                     );
+
+                    if passing_qps_budget == 0 && avail_qps > 0 {
+                        warn!(
+                            "Passing qps budget became zero but have avail QPS! This should not happen unless inactive!"
+                        );
+                    }
+
+                    task_cycle_threshold(&histogram, &state, passing_qps_budget, cfg.min_threshold);
                 }
+            })
+        };
 
-                task_cycle_threshold(
-                    &histogram_clone,
-                    &state_clone,
-                    passing_qps_budget,
-                    min_threshold_clone,
-                );
-            }
-        });
-
-        let tree_clone = tree.clone();
-        let segment_ttl_clone = segment_ttl.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(segment_ttl_clone);
-            loop {
-                interval.tick().await;
-                task_tree_prune(&tree_clone);
-            }
-        });
+        let h2 = {
+            let tree = tree.clone();
+            let segment_ttl = *segment_ttl;
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(segment_ttl);
+                loop {
+                    interval.tick().await;
+                    task_tree_prune(&tree);
+                }
+            })
+        };
 
         TreeShaper {
-            metric: metric.clone(),
             histogram,
             tree,
             features: features.clone(),
             state,
-            qps_explore_percent: explore_percent,
-            qps_limit,
+            config,
+            task_handles: vec![h1, h2],
         }
+    }
+
+    pub fn features(&self) -> &[ShapingFeature] {
+        &self.features
+    }
+
+    pub fn update_config(
+        &self,
+        metric: Metric,
+        explore_percent: u32,
+        qps_limit: u32,
+        min_threshold: f32,
+    ) {
+        self.config.store(Arc::new(DynamicConfig {
+            metric,
+            explore_percent,
+            qps_limit,
+            min_threshold,
+        }));
     }
 
     fn extract_features(&self, req: &BidRequest, bid: Option<&Bid>) -> Vec<Feature> {
@@ -234,7 +264,9 @@ impl TreeShaper {
             }
         };
 
-        let metric_value = match self.metric {
+        let cfg = self.config.load();
+
+        let metric_value = match cfg.metric {
             Metric::BidRate => prediction.value.bid_rate_percent(),
             Metric::Bvpm => prediction.value.bid_value_per_mille(),
             Metric::FillRate => prediction.value.fill_rate_percent(),
@@ -275,8 +307,8 @@ impl TreeShaper {
         }
 
         let qps_exploratory = tree::utils::qps_budget_exploratory(
-            self.qps_explore_percent,
-            self.qps_limit,
+            cfg.explore_percent,
+            cfg.qps_limit,
             state.qps_avail, // exploratory is percent of endpoint qps limit OR all avail
         );
         if tree::utils::qps_passes_percentage(qps_exploratory, avail_qps_pool) {
@@ -328,7 +360,7 @@ impl TreeShaper {
         let qps_boost = tree::utils::qps_budget_boost(
             state.qps_passing,
             qps_exploratory,
-            self.qps_limit,
+            cfg.qps_limit,
             avail_qps_pool,
         );
         if tree::utils::qps_passes_percentage(qps_boost, avail_qps_pool) {
@@ -418,5 +450,13 @@ impl TreeShaper {
                 },
             )
             .map_err(|e| anyhow!("Failed recording tree impression: {}", e))
+    }
+}
+
+impl Drop for TreeShaper {
+    fn drop(&mut self) {
+        for handle in &self.task_handles {
+            handle.abort();
+        }
     }
 }
