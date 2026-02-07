@@ -2,14 +2,21 @@ use crate::core::providers::{Provider, ProviderEvent};
 use anyhow::Error;
 use async_trait::async_trait;
 use firestore::{
-    FirestoreDb, FirestoreListenEvent, FirestoreListenerTarget, FirestoreMemListenStateStorage,
+    FirestoreDb, FirestoreListenEvent, FirestoreListener, FirestoreListenerTarget,
+    FirestoreMemListenStateStorage,
 };
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, warn};
+
+/// Firestore TargetChangeType::Reset
+/// Sent when the server can't resume from the client's token (e.g. after ~30 min disconnect),
+/// indicating a full re-snapshot will follow. We dont expect
+/// this to happen in prod but better safe than sorry
+const TARGET_CHANGE_TYPE_RESET: i32 = 4;
 
 pub struct FirestoreProvider<T> {
     db: Arc<FirestoreDb>,
@@ -36,7 +43,14 @@ where
             .select()
             .from(self.collection.as_str())
             .query()
-            .await?;
+            .await
+            .map_err(|e| {
+                error!(
+                    "Firestore query failed for collection {}: {} ({:?})",
+                    self.collection, e, e
+                );
+                e
+            })?;
 
         let mut results = Vec::with_capacity(docs.len());
         let mut seen = HashSet::new();
@@ -69,43 +83,34 @@ where
     ) {
         let db = self.db.clone();
         let collection = self.collection.clone();
-        let seen_docs = Arc::new(RwLock::new(seen_docs));
+        let seen_docs = Arc::new(Mutex::new(seen_docs));
 
         tokio::spawn(async move {
             let mut backoff = Duration::from_secs(1);
             let max_backoff = Duration::from_secs(60);
-            let mut is_reconnect = false;
 
             loop {
-                match Self::run_listener(
-                    &db,
+                match Self::create_listener(
+                    db.clone(),
                     &collection,
                     seen_docs.clone(),
                     on_event.clone(),
-                    is_reconnect,
                 )
                 .await
                 {
-                    Ok(()) => {
-                        warn!(
-                            "Firestore listener for {} exited unexpectedly, reconnecting",
-                            collection
-                        );
+                    Ok(_listener) => {
+                        debug!("Firestore listener for {} is running", collection);
+                        std::future::pending::<()>().await;
                     }
                     Err(err) => {
                         error!(
-                            "Firestore listener for {} failed: {}, reconnecting in {:?}",
+                            "Failed to start Firestore listener for {}: {}, retrying in {:?}",
                             collection, err, backoff
                         );
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(max_backoff);
-                        is_reconnect = true;
-                        continue;
                     }
                 }
-
-                backoff = Duration::from_secs(1);
-                is_reconnect = true;
             }
         });
     }
@@ -113,59 +118,53 @@ where
     async fn reconcile(
         db: &FirestoreDb,
         collection: &str,
-        seen_docs: &RwLock<HashSet<String>>,
+        seen_docs: &Mutex<HashSet<String>>,
         on_event: &(dyn Fn(ProviderEvent<T>) + Send + Sync),
     ) -> Result<(), Error> {
         let docs = db.fluent().select().from(collection).query().await?;
 
-        let mut current_docs = HashSet::new();
-        for doc in &docs {
-            current_docs.insert(doc.name.clone());
-        }
+        let current_docs: HashSet<String> = docs.iter().map(|d| d.name.clone()).collect();
 
+        // detect removals of docs we knew about that no longer exist
         let removed: Vec<String> = {
-            let seen = seen_docs.read();
+            let seen = seen_docs.lock();
             seen.difference(&current_docs).cloned().collect()
         };
 
-        for doc_path in removed {
-            let doc_id = doc_path.rsplit('/').next().unwrap_or(&doc_path).to_string();
+        for doc_path in &removed {
+            let doc_id = doc_path.rsplit('/').next().unwrap_or(doc_path).to_string();
             on_event(ProviderEvent::Removed(doc_id));
         }
 
-        for doc in docs {
-            match FirestoreDb::deserialize_doc_to::<T>(&doc) {
-                Ok(obj) => on_event(ProviderEvent::Modified(obj)),
-                Err(err) => {
-                    warn!(
-                        "Failed to deserialize document {} during reconcile: {}",
-                        doc.name, err
-                    );
-                }
+        // update seen_docs, remove stale entries, add any we missed.
+        {
+            let mut seen = seen_docs.lock();
+            for doc_path in &removed {
+                seen.remove(doc_path);
+            }
+
+            for doc_name in &current_docs {
+                seen.insert(doc_name.clone());
             }
         }
 
-        *seen_docs.write() = current_docs;
+        if !removed.is_empty() {
+            debug!(
+                "Reconciled collection {}: removed {} stale documents",
+                collection,
+                removed.len()
+            );
+        }
 
-        debug!(
-            "Reconciled {} documents for collection {}",
-            seen_docs.read().len(),
-            collection
-        );
         Ok(())
     }
 
-    async fn run_listener(
-        db: &FirestoreDb,
+    async fn create_listener(
+        db: Arc<FirestoreDb>,
         collection: &str,
-        seen_docs: Arc<RwLock<HashSet<String>>>,
+        seen_docs: Arc<Mutex<HashSet<String>>>,
         on_event: Arc<dyn Fn(ProviderEvent<T>) + Send + Sync>,
-        is_reconnect: bool,
-    ) -> Result<(), Error> {
-        if is_reconnect {
-            Self::reconcile(db, collection, &seen_docs, on_event.as_ref()).await?;
-        }
-
+    ) -> Result<FirestoreListener<FirestoreDb, FirestoreMemListenStateStorage>, Error> {
         let mut listener = db
             .create_listener(FirestoreMemListenStateStorage::new())
             .await?;
@@ -178,10 +177,13 @@ where
 
         debug!("Starting Firestore listener for collection: {}", collection);
 
+        let collection = collection.to_string();
         listener
             .start(move |event| {
-                let seen_docs = seen_docs.clone();
                 let on_event = on_event.clone();
+                let seen_docs = seen_docs.clone();
+                let db = db.clone();
+                let collection = collection.clone();
 
                 async move {
                     match event {
@@ -189,7 +191,8 @@ where
                             if let Some(doc) = change.document {
                                 match FirestoreDb::deserialize_doc_to::<T>(&doc) {
                                     Ok(obj) => {
-                                        let is_new = seen_docs.write().insert(doc.name.clone());
+                                        let is_new = seen_docs.lock().insert(doc.name.clone());
+
                                         let ev = if is_new {
                                             ProviderEvent::Added(obj)
                                         } else {
@@ -198,13 +201,13 @@ where
                                         on_event(ev);
                                     }
                                     Err(err) => {
-                                        warn!("Failed to deserialize Firestore document: {}", err);
+                                        warn!("Failed to deserialize Firestore document: {}", err)
                                     }
                                 }
                             }
                         }
                         FirestoreListenEvent::DocumentDelete(del) => {
-                            seen_docs.write().remove(&del.document);
+                            seen_docs.lock().remove(&del.document);
                             let doc_id = del
                                 .document
                                 .rsplit('/')
@@ -214,7 +217,7 @@ where
                             on_event(ProviderEvent::Removed(doc_id));
                         }
                         FirestoreListenEvent::DocumentRemove(rem) => {
-                            seen_docs.write().remove(&rem.document);
+                            seen_docs.lock().remove(&rem.document);
                             let doc_id = rem
                                 .document
                                 .rsplit('/')
@@ -223,6 +226,17 @@ where
                                 .to_string();
                             on_event(ProviderEvent::Removed(doc_id));
                         }
+                        FirestoreListenEvent::TargetChange(tc)
+                            if tc.target_change_type == TARGET_CHANGE_TYPE_RESET =>
+                        {
+                            warn!("Firestore listener reset for {}, reconciling", collection);
+                            if let Err(err) =
+                                Self::reconcile(&db, &collection, &seen_docs, on_event.as_ref())
+                                    .await
+                            {
+                                warn!("Reconciliation failed for {}: {}", collection, err);
+                            }
+                        }
                         _ => {}
                     }
                     Ok(())
@@ -230,7 +244,7 @@ where
             })
             .await?;
 
-        Ok(())
+        Ok(listener)
     }
 }
 
