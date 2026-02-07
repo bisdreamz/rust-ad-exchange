@@ -7,13 +7,20 @@ use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::BidRequest;
+use rtb::bid_request::DistributionchannelOneof;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
+use rtb::spec::adcom::devicetype;
 use std::sync::Arc;
 use tracing::debug;
 use tracing::{Instrument, Span};
 
-fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> bool {
+fn matches_endpoint(
+    context: &AuctionContext,
+    bidder: &Bidder,
+    endpoint: &Endpoint,
+    req: &BidRequest,
+) -> bool {
     let span = child_span_info!(
         "bidder_endpoint_matching_task",
         bidder_name = tracing::field::Empty,
@@ -32,8 +39,20 @@ fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> b
     }
 
     let targeting = &endpoint.targeting;
-    let device = &req.device.as_ref().expect("No device");
-    let geo = &device.geo.as_ref().expect("No geo");
+    let device = match req.device.as_ref() {
+        Some(device) => device,
+        None => {
+            span.record("bidder_endpoint_filter_reason", "missing_device");
+            return false;
+        }
+    };
+    let geo = match device.geo.as_ref() {
+        Some(geo) => geo,
+        None => {
+            span.record("bidder_endpoint_filter_reason", "missing_geo");
+            return false;
+        }
+    };
 
     let geo_match = targeting.geos.is_empty()
         || targeting.geos.first().unwrap() == "*"
@@ -45,19 +64,76 @@ fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> b
         return false;
     }
 
-    let mut format_match = false;
+    let format_match = req.imp.iter().any(|imp| {
+        let f = &targeting.formats;
 
-    for imp in &req.imp {
-        let imp_match = (imp.banner.is_some() && targeting.banner)
-            || (imp.video.is_some() && targeting.video)
-            || (imp.native.is_some() && targeting.native);
-
-        format_match = imp_match;
-        break;
-    }
+        (imp.banner.is_some() && f.banner)
+            || (imp.video.is_some() && f.video)
+            || (imp.native.is_some() && f.native)
+            || (imp.audio.is_some() && f.audio)
+    });
 
     if !format_match {
         span.record("bidder_endpoint_filter_reason", "ad_format");
+
+        return false;
+    }
+
+    let channel = match &req.distributionchannel_oneof {
+        Some(channel) => channel,
+        None => return false,
+    };
+
+    let channel_match = match channel {
+        DistributionchannelOneof::Site(_) => targeting.channels.site,
+        DistributionchannelOneof::App(_) => targeting.channels.app,
+        DistributionchannelOneof::Dooh(_) => targeting.channels.dooh,
+    };
+
+    if !channel_match {
+        span.record("bidder_endpoint_filter_reason", "channel_type");
+
+        return false;
+    }
+
+    match device.devicetype as u32 {
+        devicetype::MOBILE_TABLET_GENERAL | devicetype::PHONE | devicetype::TABLET => {
+            if !targeting.devices.mobile {
+                span.record("bidder_endpoint_filter_reason", "device_type");
+
+                return false;
+            }
+        }
+        devicetype::PERSONAL_COMPUTER => {
+            if !targeting.devices.desktop {
+                span.record("bidder_endpoint_filter_reason", "device_type");
+
+                return false;
+            }
+        }
+        devicetype::CONNECTED_TV | devicetype::CONNECTED_DEVICE | devicetype::SET_TOP_BOX => {
+            if !targeting.devices.ctv {
+                span.record("bidder_endpoint_filter_reason", "device_type");
+
+                return false;
+            }
+        }
+        devicetype::DOOH => {
+            if !targeting.devices.dooh {
+                span.record("bidder_endpoint_filter_reason", "device_type");
+
+                return false;
+            }
+        }
+        _ => {
+            span.record("bidder_endpoint_filter_reason", "unknown_device_type");
+
+            return false;
+        }
+    }
+
+    if !targeting.pubs.is_empty() && !targeting.pubs.contains(&context.pubid) {
+        span.record("bidder_endpoint_filter_reason", "publisher_id");
 
         return false;
     }
@@ -66,16 +142,18 @@ fn matches_endpoint(bidder: &Bidder, endpoint: &Endpoint, req: &BidRequest) -> b
 }
 
 fn get_filtered_matching(
+    context: &AuctionContext,
     bidders: &Vec<(Arc<Bidder>, Vec<Arc<Endpoint>>)>,
-    req: &BidRequest,
 ) -> Vec<(Arc<Bidder>, Vec<Arc<Endpoint>>)> {
     let mut matches = Vec::with_capacity(bidders.len());
+
+    let req = context.req.read();
 
     for (bidder, endpoints) in bidders {
         let mut bidder_matches = Vec::with_capacity(endpoints.len());
 
         for endpoint in endpoints {
-            if matches_endpoint(bidder, endpoint, req) {
+            if matches_endpoint(context, bidder, endpoint, &req) {
                 bidder_matches.push(endpoint.clone());
             }
         }
@@ -101,10 +179,7 @@ impl BidderMatchingTask {
         let mut bidder_contexts = Vec::new();
         let span = Span::current();
 
-        let matches = get_filtered_matching(
-            self.manager.bidders_endpoints().as_ref(),
-            &*context.req.read(),
-        );
+        let matches = get_filtered_matching(context, self.manager.bidders_endpoints().as_ref());
 
         if !span.is_disabled() {
             span.record("bidder_matches_count", matches.len());

@@ -105,10 +105,15 @@ impl QpslimiterTask {
                         }
                     }
                 }
-                DemandChange::Removed { bidder_id, prev_endpoints } => {
+                DemandChange::Removed {
+                    bidder_id,
+                    prev_endpoints,
+                } => {
                     for ep in prev_endpoints {
-                        debug!("Bidder {} deleted, removing QPS limiter for endpoint {}",
-                            bidder_id, ep.name);
+                        debug!(
+                            "Bidder {} deleted, removing QPS limiter for endpoint {}",
+                            bidder_id, ep.name
+                        );
                         map.remove(&ep.name);
                     }
                 }

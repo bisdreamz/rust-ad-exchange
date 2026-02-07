@@ -165,10 +165,16 @@ impl ShaperManager {
                     }
                 }
             }
-            DemandChange::Removed { bidder_id, prev_endpoints, .. } => {
+            DemandChange::Removed {
+                bidder_id,
+                prev_endpoints,
+                ..
+            } => {
                 for ep in prev_endpoints {
-                    info!("Bidder {} deleted, removing shaper for endpoint {}",
-                        bidder_id, ep.name);
+                    info!(
+                        "Bidder {} deleted, removing shaper for endpoint {}",
+                        bidder_id, ep.name
+                    );
                     shapers.remove(&ep.name);
                 }
             }

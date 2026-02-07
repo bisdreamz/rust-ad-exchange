@@ -4,12 +4,76 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
-pub struct Targeting {
-    pub geos: Vec<String>,
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct TargetingFormats {
     pub banner: bool,
     pub video: bool,
     pub native: bool,
+    pub audio: bool,
+}
+
+impl Default for TargetingFormats {
+    fn default() -> Self {
+        Self {
+            banner: true,
+            video: true,
+            native: true,
+            audio: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct TargetingChannelTypes {
+    /// App requests are enabled
+    pub app: bool,
+    /// Site requests are enabled
+    pub site: bool,
+    /// Dooh requests are enabled. This is the *actual*
+    /// 2.x channel in ortb 2.x, which replaces the site/app obj
+    pub dooh: bool,
+}
+
+impl Default for TargetingChannelTypes {
+    fn default() -> Self {
+        Self {
+            app: true,
+            site: true,
+            dooh: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct TargetingDeviceTypes {
+    pub mobile: bool,
+    pub desktop: bool,
+    pub ctv: bool,
+    pub dooh: bool,
+}
+
+impl Default for TargetingDeviceTypes {
+    fn default() -> Self {
+        Self {
+            mobile: true,
+            desktop: true,
+            ctv: true,
+            dooh: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
+pub struct Targeting {
+    /// Specific geos or all if empty
+    pub geos: Vec<String>,
+    /// Specific publishers only or all if empty
+    pub pubs: Vec<String>,
+    pub formats: TargetingFormats,
+    /// Enable channels
+    pub channels: TargetingChannelTypes,
+    /// Enable device types
+    pub devices: TargetingDeviceTypes,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, EnumString, Display)]
