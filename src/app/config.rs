@@ -81,8 +81,8 @@ pub struct RexConfig {
     pub ssl: Option<TlsConfig>,
     #[serde(default)]
     pub caches: CacheConfig,
-    pub bidders: Vec<BidderConfig>,
-    pub publishers: Vec<Publisher>,
+    pub bidders: Option<Vec<BidderConfig>>,
+    pub publishers: Option<Vec<Publisher>>,
     pub notifications: EventConfig,
     #[serde(default)]
     pub cluster: ClusterConfig,

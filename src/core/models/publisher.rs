@@ -14,7 +14,7 @@ pub struct Publisher {
     pub id: String,
     /// Publisher domain, used in sellers.json
     pub domain: String,
-    pub schain_type: PublisherType,
+    pub seller_type: PublisherType,
     pub enabled: bool,
     pub name: String,
     pub margin: u32,

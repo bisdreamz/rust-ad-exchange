@@ -21,6 +21,7 @@ impl Provider<BidderConfig> for ConfigDemandProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<BidderConfig>) + Send + Sync>,
     ) -> Result<Vec<BidderConfig>, Error> {
-        Ok(self.config_manager.get().bidders.clone())
+        self.config_manager.get().bidders.clone()
+            .ok_or_else(|| anyhow::anyhow!("bidders must be defined in config when Firestore is not configured"))
     }
 }

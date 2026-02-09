@@ -21,6 +21,7 @@ impl Provider<Publisher> for ConfigPublisherProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<Publisher>) + Send + Sync>,
     ) -> Result<Vec<Publisher>, Error> {
-        Ok(self.config_manager.get().publishers.clone())
+        self.config_manager.get().publishers.clone()
+            .ok_or_else(|| anyhow::anyhow!("publishers must be defined in config when Firestore is not configured"))
     }
 }
