@@ -1,7 +1,9 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::PublisherBlockReason;
+use crate::core::spec::nobidreasons;
 use anyhow::anyhow;
 use pipeline::BlockingTask;
+use rtb::bid_request::DistributionchannelOneof;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
 use tracing::debug;
@@ -70,11 +72,11 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
         let device = device_opt.unwrap();
 
-        if device.ua.is_empty() {
+        if device.ua.is_empty() || (device.ip.is_empty() && device.ipv6.is_empty()) {
             let brs = BidResponseState::NoBidReason {
                 reqid: context.original_auction_id.clone(),
-                nbr: rtb::spec::openrtb::nobidreason::INVALID_REQUEST,
-                desc: Some("Missing device user-agent".into()),
+                nbr: nobidreasons::MISSING_DEVICE_DETAILS,
+                desc: Some("Missing device user-agent or IP".into()),
             };
 
             context
@@ -84,12 +86,12 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
             context
                 .block_reason
-                .set(PublisherBlockReason::MissingDeviceUa)
+                .set(PublisherBlockReason::MissingDeviceDetails)
                 .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
 
-            span.record("invalid_reason", "missing_user_agent");
+            span.record("invalid_reason", "missing_dev_ua_or_ip");
 
-            return Err(anyhow!("Auction device object missing ua value"));
+            return Err(anyhow!("Auction device object missing ua or ip"));
         }
 
         if req.imp.is_empty() {
@@ -129,6 +131,67 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
             span.record("invalid_reason", "missing_app_site");
 
             return Err(anyhow!("Auction missing app, site, or dooh object"));
+        }
+
+        match req.distributionchannel_oneof.as_ref().unwrap() {
+            DistributionchannelOneof::Site(site) => {
+                if site.domain.is_empty() && site.page.is_empty() {
+                    context
+                        .res
+                        .set(BidResponseState::NoBidReason {
+                            reqid: context.original_auction_id.clone(),
+                            nbr: nobidreasons::MISSING_DOMAIN_OR_BUNDLE,
+                            desc: Some("Missing site domain".into()),
+                        })
+                        .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
+                    context
+                        .block_reason
+                        .set(PublisherBlockReason::MissingAppSiteDomain)
+                        .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
+                    return Err(anyhow!("Auction missing site domain"));
+                }
+            }
+            DistributionchannelOneof::App(app) => {
+                // todo block on missing store url?
+                if app.bundle.is_empty() {
+                    context
+                        .res
+                        .set(BidResponseState::NoBidReason {
+                            reqid: context.original_auction_id.clone(),
+                            nbr: nobidreasons::MISSING_DOMAIN_OR_BUNDLE,
+                            desc: Some("Missing app bundle".into()),
+                        })
+                        .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
+                    context
+                        .block_reason
+                        .set(PublisherBlockReason::MissingAppSiteDomain)
+                        .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
+                    return Err(anyhow!("Auction missing app bundle"));
+                }
+            }
+            DistributionchannelOneof::Dooh(_) => {}
+        };
+
+        if req.tmax > 0 && req.tmax < 50 {
+            context
+                .res
+                .set(BidResponseState::NoBidReason {
+                    reqid: context.original_auction_id.clone(),
+                    nbr: rtb::spec::openrtb::nobidreason::INSUFFICIENT_AUCTION_TIME,
+                    desc: Some("Tmax too low".into()),
+                })
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
+            context
+                .block_reason
+                .set(PublisherBlockReason::TmaxTooLow)
+                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
+
+            return Err(anyhow!("Auction tmax too low (< 50ms)"));
         }
 
         debug!("Request passed basic validation");

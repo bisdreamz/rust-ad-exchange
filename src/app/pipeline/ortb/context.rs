@@ -177,8 +177,10 @@ pub enum PublisherBlockReason {
     BidsProcessingError,
     MissingAuctionId,
     MissingDevice,
-    MissingDeviceUa,
+    MissingDeviceDetails,
     MissingAppSite,
+    MissingAppSiteDomain,
+    TmaxTooLow,
 }
 
 /// Top level auction context object which carries all context required

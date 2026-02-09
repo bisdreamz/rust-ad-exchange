@@ -138,6 +138,14 @@ fn matches_endpoint(
         return false;
     }
 
+    // if a company is supply & demand, dont send them
+    // their own supply
+    if context.pubid == bidder.id {
+        span.record("bidder_endpoint_filter_reason", "self_publisher_id");
+
+        return false;
+    }
+
     true
 }
 

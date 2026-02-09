@@ -1,9 +1,20 @@
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum PublisherType {
+    #[default]
+    Publisher,
+    Intermediary,
+    Both,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
 pub struct Publisher {
     pub id: String,
+    /// Publisher domain, used in sellers.json
+    pub domain: String,
+    pub schain_type: PublisherType,
     pub enabled: bool,
     pub name: String,
     pub margin: u32,

@@ -74,6 +74,7 @@ fn build_rtb_pipeline(context: &StartupContext) -> Result<Pipeline<AuctionContex
         .with_blocking(Box::new(tasks::auction::SchainHopsGlobalFilter::new(
             config.schain_limit,
         )))
+        .with_blocking(Box::new(tasks::auction::JunkFilterTask))
         .with_blocking(Box::new(tasks::auction::IpBlockTask::new(ip_risk_filter)))
         .with_blocking(Box::new(tasks::auction::DeviceLookupTask::new(
             device_lookup,

@@ -61,4 +61,6 @@ pub use margin_task::BidMarginTask;
 mod schain_append;
 pub use schain_append::SchainAppendTask;
 
+mod junk_filter;
 mod utils;
+pub use junk_filter::JunkFilterTask;

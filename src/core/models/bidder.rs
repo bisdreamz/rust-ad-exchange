@@ -64,6 +64,7 @@ impl Default for TargetingDeviceTypes {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
+#[serde(default)]
 pub struct Targeting {
     /// Specific geos or all if empty
     pub geos: Vec<String>,
@@ -97,6 +98,7 @@ pub enum Encoding {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Builder)]
+#[serde(default)]
 pub struct Endpoint {
     pub enabled: bool,
     pub name: String,
