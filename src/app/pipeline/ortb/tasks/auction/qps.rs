@@ -129,7 +129,9 @@ impl QpslimiterTask {
     ) -> HashMap<String, Option<DefaultDirectRateLimiter>> {
         let mut endpoints_limiters = HashMap::new();
 
-        let cluster_sz = if cluster_sz > 1 { cluster_sz } else {
+        let cluster_sz = if cluster_sz > 1 {
+            cluster_sz
+        } else {
             warn!("Cluster size reported 0, counting self. New cluster state?");
 
             1

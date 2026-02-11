@@ -195,12 +195,15 @@ fn extract_cookies(http_req: &HttpRequest) -> HashMap<String, String> {
 }
 
 fn build_rxid_cookie(uid: &str) -> Cookie<'_> {
-    let mut builder = Cookie::build(usersync::constants::CONST_REX_COOKIE_ID_PARAM, uid.to_owned())
-        .path("/")
-        .secure(true)
-        .http_only(true)
-        .same_site(SameSite::None)
-        .max_age(CookieDuration::days(365));
+    let mut builder = Cookie::build(
+        usersync::constants::CONST_REX_COOKIE_ID_PARAM,
+        uid.to_owned(),
+    )
+    .path("/")
+    .secure(true)
+    .http_only(true)
+    .same_site(SameSite::None)
+    .max_age(CookieDuration::days(365));
 
     if let Some(Some(domain)) = COOKIE_DOMAIN.get() {
         builder = builder.domain(domain.clone());
@@ -340,10 +343,12 @@ async fn sync_debug_handler(
     let bidders = bidder_manager.bidders();
 
     let pub_sync = publisher.as_ref().and_then(|p| {
-        p.sync_url.as_ref().map(|url| crate::core::models::sync::SyncConfig {
-            kind: crate::core::models::sync::SyncKind::Image,
-            url: url.clone(),
-        })
+        p.sync_url
+            .as_ref()
+            .map(|url| crate::core::models::sync::SyncConfig {
+                kind: crate::core::models::sync::SyncKind::Image,
+                url: url.clone(),
+            })
     });
 
     let sync_html =
@@ -383,10 +388,7 @@ async fn sync_debug_handler(
 }
 
 /// Allowed origins for the sync debug endpoint
-const DEBUG_ALLOWED_ORIGINS: &[&str] = &[
-    "http://localhost:3000",
-    "https://app.neuronicads.com",
-];
+const DEBUG_ALLOWED_ORIGINS: &[&str] = &["http://localhost:3000", "https://app.neuronicads.com"];
 
 fn apply_debug_cors(req: &HttpRequest, response: &mut actix_web::HttpResponseBuilder) {
     let origin = req
@@ -395,7 +397,10 @@ fn apply_debug_cors(req: &HttpRequest, response: &mut actix_web::HttpResponseBui
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if DEBUG_ALLOWED_ORIGINS.iter().any(|&allowed| allowed == origin) {
+    if DEBUG_ALLOWED_ORIGINS
+        .iter()
+        .any(|&allowed| allowed == origin)
+    {
         response.insert_header(("Access-Control-Allow-Origin", origin));
         response.insert_header(("Access-Control-Allow-Credentials", "true"));
     }
@@ -484,95 +489,94 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .ok_or(anyhow::anyhow!("Sync store not built"))?
             .clone();
 
-        let server = Server::listen(server_cfg, move |app| {
-            app.route("/hi", web::get().to(|| async { "hi!" }))
-                .route(
-                    billing_event_path.as_str(),
-                    web::get().to({
-                        let pipeline = billing_event_pipeline.clone();
-                        move |http_req: HttpRequest| {
-                            let p = pipeline.clone();
+        let server =
+            Server::listen(server_cfg, move |app| {
+                app.route("/hi", web::get().to(|| async { "hi!" }))
+                    .route(
+                        billing_event_path.as_str(),
+                        web::get().to({
+                            let pipeline = billing_event_pipeline.clone();
+                            move |http_req: HttpRequest| {
+                                let p = pipeline.clone();
 
-                            async move { billing_event_handler(http_req, p).await }
-                        }
-                    }),
-                )
-                .route(
-                    "/br/json/{pubid}",
-                    web::post().to({
-                        let pipeline = rtb_pipeline.clone();
-                        move |pubid: web::Path<String>,
-                              req: FastJson<BidRequest>,
-                              http_req: HttpRequest| {
-                            let auction_id = req.id.clone();
-                            let pubid = pubid.into_inner();
-                            let p = pipeline.clone();
-
-                            async move {
-                                json_bid_handler(
-                                    auction_id,
-                                    pubid,
-                                    req,
-                                    http_req,
-                                    p,
-                                    span_sample_rate,
-                                )
-                                .await
+                                async move { billing_event_handler(http_req, p).await }
                             }
-                        }
-                    }),
-                )
-                .route(
-                    "/sync/out/{pubid}",
-                    web::get().to({
-                        let pipeline = sync_out_pipeline.clone();
+                        }),
+                    )
+                    .route(
+                        "/br/json/{pubid}",
+                        web::post().to({
+                            let pipeline = rtb_pipeline.clone();
+                            move |pubid: web::Path<String>,
+                                  req: FastJson<BidRequest>,
+                                  http_req: HttpRequest| {
+                                let auction_id = req.id.clone();
+                                let pubid = pubid.into_inner();
+                                let p = pipeline.clone();
 
-                        move |pubid: web::Path<String>, http_req: HttpRequest| {
-                            let pubid = pubid.into_inner();
-                            let p = pipeline.clone();
-                            async move { sync_out_handler(pubid, http_req, p).await }
-                        }
-                    }),
-                )
-                .route(
-                    "/sync/in",
-                    web::get().to({
-                        let pipeline = sync_in_pipeline.clone();
-
-                        move |http_req: HttpRequest| {
-                            let p = pipeline.clone();
-                            async move { sync_in_handler(http_req, p).await }
-                        }
-                    }),
-                )
-                .route(
-                    "/sync/debug/{pubid}",
-                    web::get().to({
-                        let bm = bidder_manager.clone();
-                        let pm = pub_manager.clone();
-                        let ss = sync_store.clone();
-
-                        move |pubid: web::Path<String>, http_req: HttpRequest| {
-                            let bm = bm.clone();
-                            let pm = pm.clone();
-                            let ss = ss.clone();
-                            let pubid = pubid.into_inner();
-                            async move {
-                                sync_debug_handler(pubid, http_req, bm, pm, ss).await
+                                async move {
+                                    json_bid_handler(
+                                        auction_id,
+                                        pubid,
+                                        req,
+                                        http_req,
+                                        p,
+                                        span_sample_rate,
+                                    )
+                                    .await
+                                }
                             }
-                        }
-                    }),
-                )
-                .route(
-                    "/sync/debug/{pubid}",
-                    web::method(actix_web::http::Method::OPTIONS).to({
-                        move |http_req: HttpRequest| {
-                            async move { sync_debug_preflight(http_req).await }
-                        }
-                    }),
-                );
-        })
-        .await?;
+                        }),
+                    )
+                    .route(
+                        "/sync/out/{pubid}",
+                        web::get().to({
+                            let pipeline = sync_out_pipeline.clone();
+
+                            move |pubid: web::Path<String>, http_req: HttpRequest| {
+                                let pubid = pubid.into_inner();
+                                let p = pipeline.clone();
+                                async move { sync_out_handler(pubid, http_req, p).await }
+                            }
+                        }),
+                    )
+                    .route(
+                        "/sync/in",
+                        web::get().to({
+                            let pipeline = sync_in_pipeline.clone();
+
+                            move |http_req: HttpRequest| {
+                                let p = pipeline.clone();
+                                async move { sync_in_handler(http_req, p).await }
+                            }
+                        }),
+                    )
+                    .route(
+                        "/sync/debug/{pubid}",
+                        web::get().to({
+                            let bm = bidder_manager.clone();
+                            let pm = pub_manager.clone();
+                            let ss = sync_store.clone();
+
+                            move |pubid: web::Path<String>, http_req: HttpRequest| {
+                                let bm = bm.clone();
+                                let pm = pm.clone();
+                                let ss = ss.clone();
+                                let pubid = pubid.into_inner();
+                                async move { sync_debug_handler(pubid, http_req, bm, pm, ss).await }
+                            }
+                        }),
+                    )
+                    .route(
+                        "/sync/debug/{pubid}",
+                        web::method(actix_web::http::Method::OPTIONS).to({
+                            move |http_req: HttpRequest| async move {
+                                sync_debug_preflight(http_req).await
+                            }
+                        }),
+                    );
+            })
+            .await?;
 
         // TODO prebid handler should define its own pipeline to record metrics
         // and extract pubid context and adapted bidrequest, then should pass
