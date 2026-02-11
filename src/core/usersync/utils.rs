@@ -24,7 +24,10 @@ pub fn generate_local_id() -> String {
 pub fn build_kind_pixel(sync: &SyncConfig, local_uid: &String, local_uid_macro: &str) -> String {
     let safe_url = sync
         .url
+        .replace('&', "&amp;")
         .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
         .replace(local_uid_macro, local_uid);
 
     match sync.kind {

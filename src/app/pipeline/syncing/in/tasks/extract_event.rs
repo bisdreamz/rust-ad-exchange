@@ -27,6 +27,8 @@ impl BlockingTask<SyncInContext, Error> for ExtractEventTask {
             warn!("Inbound buyeruid sync but we didnt recognize the user. Unexpected");
         }
 
+        let _ = context.local_uid.set(local_uid.clone());
+
         let sync_in_event = SyncInEvent::from(data_url, local_uid)
             .map_err(|_| anyhow!("Failed to parse data url into sync in event"))?;
 

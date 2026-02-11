@@ -129,7 +129,11 @@ impl QpslimiterTask {
     ) -> HashMap<String, Option<DefaultDirectRateLimiter>> {
         let mut endpoints_limiters = HashMap::new();
 
-        assert!(cluster_sz > 0, "Cluster cannot be empty!");
+        let cluster_sz = if cluster_sz > 1 { cluster_sz } else {
+            warn!("Cluster size reported 0, counting self. New cluster state?");
+
+            1
+        };
 
         bidder_manager
             .bidders_endpoints()

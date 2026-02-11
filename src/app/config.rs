@@ -92,6 +92,12 @@ pub struct RexConfig {
     pub schain_limit: u32,
     #[serde(default)]
     pub firestore: Option<FirestoreConfig>,
+    /// The root domain for the rxid cookie, e.g. the parent domain
+    /// shared across sync, bidding, and regional subdomains. When set,
+    /// cookie is accessible across all subdomains. When absent, cookie
+    /// is host-only (suitable for local development)
+    #[serde(default)]
+    pub cookie_domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

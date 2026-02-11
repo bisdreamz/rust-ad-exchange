@@ -3,8 +3,12 @@ use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::syncing::r#in::context::SyncInContext;
 use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
+use crate::app::pipeline::syncing::utils;
+use crate::core::managers::{DemandManager, PublisherManager};
 use crate::core::usersync;
-use actix_web::cookie::Cookie;
+use crate::core::usersync::SyncStore;
+use actix_web::cookie::time::Duration as CookieDuration;
+use actix_web::cookie::{Cookie, SameSite};
 use actix_web::web;
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use anyhow::{Error, anyhow, bail};
@@ -16,9 +20,12 @@ use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::json::{FastJson, JsonBidResponseState};
 use rtb::server::{Server, ServerConfig};
 use rtb::{BidRequest, sample_or_attach_root_span};
+use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use tracing::{Instrument, debug, info, instrument, warn};
+
+static COOKIE_DOMAIN: OnceLock<Option<String>> = OnceLock::new();
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex")
@@ -187,6 +194,21 @@ fn extract_cookies(http_req: &HttpRequest) -> HashMap<String, String> {
     )
 }
 
+fn build_rxid_cookie(uid: &str) -> Cookie<'_> {
+    let mut builder = Cookie::build(usersync::constants::CONST_REX_COOKIE_ID_PARAM, uid.to_owned())
+        .path("/")
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::None)
+        .max_age(CookieDuration::days(365));
+
+    if let Some(Some(domain)) = COOKIE_DOMAIN.get() {
+        builder = builder.domain(domain.clone());
+    }
+
+    builder.finish()
+}
+
 async fn sync_out_handler(
     pubid: String,
     http_req: HttpRequest,
@@ -194,7 +216,6 @@ async fn sync_out_handler(
 ) -> impl Responder {
     let cookies = extract_cookies(&http_req);
     let context = SyncOutContext::new(pubid, cookies);
-    let cookie_param_key = usersync::constants::CONST_REX_COOKIE_ID_PARAM;
 
     if let Err(e) = pipeline.run(&context).await {
         // this isnt an error in and of its self, so just log reason
@@ -205,10 +226,7 @@ async fn sync_out_handler(
         warn!("Cookie init sync returned Ok but no response attached!");
         let mut response = HttpResponse::InternalServerError();
         if let Some(uid) = context.local_uid.get() {
-            let cookie = Cookie::build(cookie_param_key, uid.clone())
-                .path("/")
-                .finish();
-            response.cookie(cookie);
+            response.cookie(build_rxid_cookie(uid));
         }
         return response.finish();
     }
@@ -220,11 +238,9 @@ async fn sync_out_handler(
             debug!("Sync-out response content: {}", html);
             let mut response = HttpResponse::Ok();
             response.content_type("text/html");
+            response.insert_header(("Cache-Control", "no-cache, no-store, must-revalidate"));
             if let Some(uid) = local_uid {
-                let cookie = Cookie::build(cookie_param_key, uid.clone())
-                    .path("/")
-                    .finish();
-                response.cookie(cookie);
+                response.cookie(build_rxid_cookie(uid));
             }
             response.body(html.clone())
         }
@@ -235,10 +251,7 @@ async fn sync_out_handler(
             );
             let mut response = HttpResponse::InternalServerError();
             if let Some(uid) = local_uid {
-                let cookie = Cookie::build(cookie_param_key, uid.clone())
-                    .path("/")
-                    .finish();
-                response.cookie(cookie);
+                response.cookie(build_rxid_cookie(uid));
             }
             response.finish()
         }
@@ -246,10 +259,7 @@ async fn sync_out_handler(
             debug!("No content response during sync. Perhaps no bidders?");
             let mut response = HttpResponse::NoContent();
             if let Some(uid) = local_uid {
-                let cookie = Cookie::build(cookie_param_key, uid.clone())
-                    .path("/")
-                    .finish();
-                response.cookie(cookie);
+                response.cookie(build_rxid_cookie(uid));
             }
             response.finish()
         }
@@ -264,13 +274,139 @@ async fn sync_in_handler(
     let cookies = extract_cookies(&http_req);
     let context = SyncInContext::new(http_req.full_url().to_string(), cookies);
 
-    match pipeline.run(&context).await {
-        Ok(_) => HttpResponse::Ok().finish(),
-        Err(e) => {
-            warn!("Sync-in pipeline aborted: {}", e);
-            HttpResponse::BadRequest().finish()
-        }
+    let pipeline_ok = pipeline.run(&context).await.is_ok();
+
+    let mut response = if pipeline_ok {
+        HttpResponse::Ok()
+    } else {
+        HttpResponse::BadRequest()
+    };
+
+    if let Some(uid) = context.local_uid.get() {
+        response.cookie(build_rxid_cookie(uid));
     }
+
+    response.finish()
+}
+
+#[derive(Serialize)]
+struct SyncDebugBidder {
+    id: String,
+    name: String,
+    sync_url: Option<String>,
+    sync_kind: Option<String>,
+    mapping: Option<SyncDebugMapping>,
+}
+
+#[derive(Serialize)]
+struct SyncDebugMapping {
+    remote_uid: String,
+    last_synced: u64,
+}
+
+#[derive(Serialize)]
+struct SyncDebugPublisher {
+    id: String,
+    name: String,
+    sync_url: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SyncDebugResponse {
+    rxid: String,
+    recognized: bool,
+    publisher: Option<SyncDebugPublisher>,
+    sync_html: String,
+    bidder_syncs: Vec<SyncDebugBidder>,
+}
+
+async fn sync_debug_handler(
+    pubid: String,
+    http_req: HttpRequest,
+    bidder_manager: Arc<DemandManager>,
+    pub_manager: Arc<PublisherManager>,
+    sync_store: Arc<dyn SyncStore>,
+) -> impl Responder {
+    let cookies = extract_cookies(&http_req);
+    let (local_uid, recognized) = utils::extract_or_assign_local_uid(&cookies);
+
+    let publisher = pub_manager.get(&pubid);
+    let pub_debug = publisher.as_ref().map(|p| SyncDebugPublisher {
+        id: pubid.clone(),
+        name: p.name.clone(),
+        sync_url: p.sync_url.clone(),
+    });
+
+    let bidders = bidder_manager.bidders();
+
+    let pub_sync = publisher.as_ref().and_then(|p| {
+        p.sync_url.as_ref().map(|url| crate::core::models::sync::SyncConfig {
+            kind: crate::core::models::sync::SyncKind::Image,
+            url: url.clone(),
+        })
+    });
+
+    let sync_html =
+        usersync::utils::generate_sync_iframe_html(&local_uid, bidders.clone(), pub_sync);
+
+    let mappings = sync_store.load(&local_uid).await.unwrap_or_default();
+
+    let bidder_syncs: Vec<SyncDebugBidder> = bidders
+        .iter()
+        .map(|b| {
+            let mapping = mappings.get(&b.id).map(|entry| SyncDebugMapping {
+                remote_uid: entry.rid.clone(),
+                last_synced: entry.ts,
+            });
+            SyncDebugBidder {
+                id: b.id.clone(),
+                name: b.name.clone(),
+                sync_url: b.usersync.as_ref().map(|s| s.url.clone()),
+                sync_kind: b.usersync.as_ref().map(|s| s.kind.to_string()),
+                mapping,
+            }
+        })
+        .collect();
+
+    let body = SyncDebugResponse {
+        rxid: local_uid.clone(),
+        recognized,
+        publisher: pub_debug,
+        sync_html,
+        bidder_syncs,
+    };
+
+    let mut response = HttpResponse::Ok();
+    response.cookie(build_rxid_cookie(&local_uid));
+    apply_debug_cors(&http_req, &mut response);
+    response.json(body)
+}
+
+/// Allowed origins for the sync debug endpoint
+const DEBUG_ALLOWED_ORIGINS: &[&str] = &[
+    "http://localhost:3000",
+    "https://app.neuronicads.com",
+];
+
+fn apply_debug_cors(req: &HttpRequest, response: &mut actix_web::HttpResponseBuilder) {
+    let origin = req
+        .headers()
+        .get("origin")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if DEBUG_ALLOWED_ORIGINS.iter().any(|&allowed| allowed == origin) {
+        response.insert_header(("Access-Control-Allow-Origin", origin));
+        response.insert_header(("Access-Control-Allow-Credentials", "true"));
+    }
+}
+
+async fn sync_debug_preflight(http_req: HttpRequest) -> impl Responder {
+    let mut response = HttpResponse::NoContent();
+    apply_debug_cors(&http_req, &mut response);
+    response.insert_header(("Access-Control-Allow-Methods", "GET, OPTIONS"));
+    response.insert_header(("Access-Control-Max-Age", "86400"));
+    response.finish()
 }
 
 #[async_trait]
@@ -281,6 +417,8 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             Some(config) => config,
             None => bail!("Config missing during start server task"),
         };
+
+        let _ = COOKIE_DOMAIN.set(config.cookie_domain.clone());
 
         let server_cfg = ServerConfig {
             http_port: Some(80),
@@ -326,6 +464,24 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .event_pipeline
             .get()
             .ok_or(anyhow::anyhow!("Event pipeline not built"))?
+            .clone();
+
+        let bidder_manager = ctx
+            .bidder_manager
+            .get()
+            .ok_or(anyhow::anyhow!("Bidder manager not built"))?
+            .clone();
+
+        let pub_manager = ctx
+            .pub_manager
+            .get()
+            .ok_or(anyhow::anyhow!("Publisher manager not built"))?
+            .clone();
+
+        let sync_store = ctx
+            .sync_store
+            .get()
+            .ok_or(anyhow::anyhow!("Sync store not built"))?
             .clone();
 
         let server = Server::listen(server_cfg, move |app| {
@@ -386,6 +542,32 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                         move |http_req: HttpRequest| {
                             let p = pipeline.clone();
                             async move { sync_in_handler(http_req, p).await }
+                        }
+                    }),
+                )
+                .route(
+                    "/sync/debug/{pubid}",
+                    web::get().to({
+                        let bm = bidder_manager.clone();
+                        let pm = pub_manager.clone();
+                        let ss = sync_store.clone();
+
+                        move |pubid: web::Path<String>, http_req: HttpRequest| {
+                            let bm = bm.clone();
+                            let pm = pm.clone();
+                            let ss = ss.clone();
+                            let pubid = pubid.into_inner();
+                            async move {
+                                sync_debug_handler(pubid, http_req, bm, pm, ss).await
+                            }
+                        }
+                    }),
+                )
+                .route(
+                    "/sync/debug/{pubid}",
+                    web::method(actix_web::http::Method::OPTIONS).to({
+                        move |http_req: HttpRequest| {
+                            async move { sync_debug_preflight(http_req).await }
                         }
                     }),
                 );

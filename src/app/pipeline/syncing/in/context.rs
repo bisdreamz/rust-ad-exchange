@@ -21,6 +21,8 @@ pub struct SyncInContext {
     /// The validated and recognized bidder object. If present, the bidder
     /// id value in the incoming sync url was a valid partner id
     pub bidder: OnceLock<Arc<Bidder>>,
+    /// The local user ID (rxid) extracted from cookies or newly assigned
+    pub local_uid: OnceLock<String>,
     /// The validated and parsed ['SyncInEvent'] from the
     /// inbound data url
     pub event: OnceLock<SyncInEvent>,

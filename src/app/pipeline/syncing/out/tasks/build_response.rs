@@ -52,9 +52,6 @@ impl BlockingTask<SyncOutContext, Error> for BuildSyncOutResponseTask {
             None => None,
         };
 
-        // TODO warn need to finish user sync uid macros!
-        warn!("Must finish user sync uid macros!");
-
         let response_html =
             usersync::utils::generate_sync_iframe_html(&local_uid, bidders, pub_sync);
         if response_html.is_empty() {

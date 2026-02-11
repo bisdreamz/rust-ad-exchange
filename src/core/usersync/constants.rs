@@ -10,4 +10,4 @@ pub const CONST_REX_COOKIE_ID_PARAM: &str = "rxid";
 /// The macro placeholder to be used in partner sync urls which
 /// represents the spot which we replace with the local exchange
 /// user ID
-pub const CONST_REX_LOCAL_ID_MACRO: &str = "$RXID";
+pub const CONST_REX_LOCAL_ID_MACRO: &str = "{RXID}";
