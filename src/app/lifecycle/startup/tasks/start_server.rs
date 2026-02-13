@@ -489,9 +489,8 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .ok_or(anyhow::anyhow!("Sync store not built"))?
             .clone();
 
-        let server =
-            Server::listen(server_cfg, move |app| {
-                app.route("/hi", web::get().to(|| async { "hi!" }))
+        let server = Server::listen(server_cfg, move |app| {
+            app.route("/hi", web::get().to(|| async { "hi!" }))
                     .route(
                         billing_event_path.as_str(),
                         web::get().to({
@@ -575,8 +574,8 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                             }
                         }),
                     );
-            })
-            .await?;
+        })
+        .await?;
 
         // TODO prebid handler should define its own pipeline to record metrics
         // and extract pubid context and adapted bidrequest, then should pass

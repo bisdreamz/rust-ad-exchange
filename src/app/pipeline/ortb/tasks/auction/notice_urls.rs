@@ -4,6 +4,7 @@ use crate::app::pipeline::ortb::context::{
 };
 use crate::core::events::billing::{BillingEvent, BillingEventBuilder};
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -15,10 +16,13 @@ use tracing::debug;
 use tracing::{Instrument, warn};
 
 fn build_billing_event(
-    event_id: &String,
+    event_id: &str,
+    pub_id: &str,
     bidder: &Bidder,
     endpoint: &Endpoint,
     bid_context: &BidContext,
+    channel: Channel,
+    device_type: StatsDeviceType,
 ) -> Result<BillingEvent, Error> {
     let ad_format = match detect_ad_format(&bid_context.bid) {
         Some(ad_format) => ad_format,
@@ -34,28 +38,41 @@ fn build_billing_event(
 
     BillingEventBuilder::default()
         .bid_timestamp(timestamp)
-        .auction_event_id(event_id.clone())
-        .bid_event_id(bid_context.bid_event_id.clone()) // TODO this needs to be a real uuid from bid_context
-        .bidder_id(bidder.name.clone())
+        .auction_event_id(event_id.to_string())
+        .bid_event_id(bid_context.bid_event_id.clone())
+        .bidder_id(bidder.id.clone())
         .endpoint_id(endpoint.name.clone())
         .cpm_cost(cpm_cost)
         .cpm_gross(bid_context.original_bid_price)
-        .pub_id("123".to_string())
+        .pub_id(pub_id.to_string())
         .event_source(None)
         .bid_ad_format(ad_format)
+        .channel(channel)
+        .device_type(device_type)
         .build()
         .map_err(Error::from)
 }
 
 fn build_event_url(
-    event_id: &String,
+    event_id: &str,
+    pub_id: &str,
     bid_context: &mut BidContext,
-    event_domain: &String,
-    billing_path: &String,
+    event_domain: &str,
+    billing_path: &str,
     bidder: &Bidder,
     endpoint: &Endpoint,
+    channel: Channel,
+    device_type: StatsDeviceType,
 ) -> Result<DataUrl, Error> {
-    let billing_event_result = build_billing_event(event_id, bidder, endpoint, &bid_context);
+    let billing_event_result = build_billing_event(
+        event_id,
+        pub_id,
+        bidder,
+        endpoint,
+        &bid_context,
+        channel,
+        device_type,
+    );
 
     let billing_event = match billing_event_result {
         Ok(event) => event,
@@ -99,11 +116,14 @@ fn build_event_url(
 /// Returns true if ALL bids present *failed* processing
 fn attach_event_handler_urls(
     event_id: &String,
+    pub_id: &String,
     event_domain: &String,
     billing_path: &String,
     bidder: &Bidder,
     endpoint: &Endpoint,
     bid_response: &mut BidResponseContext,
+    channel: Channel,
+    device_type: StatsDeviceType,
 ) -> bool {
     let mut total = 0;
     let mut errs = 0;
@@ -118,11 +138,14 @@ fn attach_event_handler_urls(
 
             let billing_data_url = match build_event_url(
                 event_id,
+                pub_id,
                 bid_context,
                 event_domain,
                 billing_path,
                 bidder,
                 endpoint,
+                channel,
+                device_type,
             ) {
                 Ok(billing_data_url) => billing_data_url,
                 Err(e) => {
@@ -178,6 +201,14 @@ impl NotificationsUrlCreationTask {
 
 impl NotificationsUrlCreationTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
+        let (channel, device_type) = {
+            let request = context.req.read();
+            let channel = Channel::from_distribution(request.distributionchannel_oneof.as_ref());
+            let device_type =
+                StatsDeviceType::from_openrtb(request.device.as_ref().map_or(0, |d| d.devicetype));
+            (channel, device_type)
+        };
+
         let mut bidders = context.bidders.lock().await;
 
         let mut total = 0;
@@ -205,11 +236,14 @@ impl NotificationsUrlCreationTask {
 
                 if attach_event_handler_urls(
                     &context.event_id,
+                    &context.pubid,
                     &self.event_domain,
                     &self.billing_path,
                     &bidder_context.bidder,
                     &callout.endpoint,
                     bid_response_context,
+                    channel,
+                    device_type,
                 ) {
                     errs += 1;
                 }

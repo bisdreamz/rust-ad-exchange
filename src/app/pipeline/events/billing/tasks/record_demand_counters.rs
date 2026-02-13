@@ -41,6 +41,8 @@ impl BlockingTask<BillingEventContext, Error> for RecordDemandBillingCountersTas
             bidder.id.as_str(),
             bidder.name.as_str(),
             &details.endpoint_id,
+            details.channel,
+            details.device_type,
             &counters,
         );
 

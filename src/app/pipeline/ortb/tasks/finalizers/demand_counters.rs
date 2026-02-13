@@ -1,6 +1,7 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderResponseState, CalloutSkipReason};
 use crate::core::firestore::counters::demand::{DemandCounterStore, DemandCounters};
+use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -62,6 +63,14 @@ impl DemandCountersTask {
     }
 
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
+        let (channel, device_type) = {
+            let request = context.req.read();
+            let channel = Channel::from_distribution(request.distributionchannel_oneof.as_ref());
+            let device_type =
+                StatsDeviceType::from_openrtb(request.device.as_ref().map_or(0, |d| d.devicetype));
+            (channel, device_type)
+        };
+
         let bidders = context.bidders.lock().await;
 
         for bidder_context in bidders.iter() {
@@ -82,6 +91,8 @@ impl DemandCountersTask {
                     bidder_id,
                     bidder_name,
                     bidder_callout.endpoint.name.as_str(),
+                    channel,
+                    device_type,
                     &counters,
                 );
 
@@ -103,8 +114,13 @@ impl DemandCountersTask {
                 ..Default::default()
             };
 
-            self.store
-                .merge_bidder(bidder_id, bidder_name, &bidder_counters);
+            self.store.merge_bidder(
+                bidder_id,
+                bidder_name,
+                channel,
+                device_type,
+                &bidder_counters,
+            );
         }
 
         Ok(())

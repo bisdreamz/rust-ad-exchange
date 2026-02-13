@@ -1,5 +1,6 @@
 use crate::core::firestore::counters::store::CounterStore;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
+use crate::core::spec::{Channel, StatsDeviceType};
 use firestore::FirestoreDb;
 use std::sync::Arc;
 use std::time::Duration;
@@ -121,22 +122,38 @@ impl DemandCounterStore {
             by_bidder: CounterStore::new(
                 db.clone(),
                 format!("{collection}_by_bidder"),
-                vec!["bidder_id", "bidder_name"],
+                vec!["bidder_id", "bidder_name", "channel", "device_type"],
                 Some(bucket),
                 update_interval,
             ),
             by_endpoint: CounterStore::new(
                 db.clone(),
                 format!("{collection}_by_endpoint"),
-                vec!["bidder_id", "bidder_name", "endpoint"],
+                vec![
+                    "bidder_id",
+                    "bidder_name",
+                    "endpoint",
+                    "channel",
+                    "device_type",
+                ],
                 Some(bucket),
                 update_interval,
             ),
         }
     }
 
-    pub fn merge_bidder(&self, bidder_id: &str, bidder_name: &str, buffer: &DemandCounters) {
-        self.by_bidder.merge(&[bidder_id, bidder_name], buffer);
+    pub fn merge_bidder(
+        &self,
+        bidder_id: &str,
+        bidder_name: &str,
+        channel: Channel,
+        device_type: StatsDeviceType,
+        buffer: &DemandCounters,
+    ) {
+        let ch = channel.to_string();
+        let dt = device_type.to_string();
+        self.by_bidder
+            .merge(&[bidder_id, bidder_name, &ch, &dt], buffer);
     }
 
     pub fn merge_endpoint(
@@ -144,10 +161,14 @@ impl DemandCounterStore {
         bidder_id: &str,
         bidder_name: &str,
         endpoint: &str,
+        channel: Channel,
+        device_type: StatsDeviceType,
         buffer: &DemandCounters,
     ) {
+        let ch = channel.to_string();
+        let dt = device_type.to_string();
         self.by_endpoint
-            .merge(&[bidder_id, bidder_name, endpoint], buffer);
+            .merge(&[bidder_id, bidder_name, endpoint, &ch, &dt], buffer);
     }
 
     pub fn merge_impression(
@@ -155,11 +176,16 @@ impl DemandCounterStore {
         bidder_id: &str,
         bidder_name: &str,
         endpoint: &str,
+        channel: Channel,
+        device_type: StatsDeviceType,
         buffer: &DemandCounters,
     ) {
-        self.by_bidder.merge(&[bidder_id, bidder_name], buffer);
+        let ch = channel.to_string();
+        let dt = device_type.to_string();
+        self.by_bidder
+            .merge(&[bidder_id, bidder_name, &ch, &dt], buffer);
         self.by_endpoint
-            .merge(&[bidder_id, bidder_name, endpoint], buffer);
+            .merge(&[bidder_id, bidder_name, endpoint, &ch, &dt], buffer);
     }
 
     pub async fn shutdown(&self) {

@@ -1,5 +1,6 @@
 use crate::core::firestore::counters::store::CounterStore;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
+use crate::core::spec::{Channel, StatsDeviceType};
 use firestore::FirestoreDb;
 use rtb::utils::adm::AdFormat;
 use std::collections::HashMap;
@@ -142,14 +143,14 @@ impl PublisherCounterStore {
             by_pub: CounterStore::new(
                 db.clone(),
                 format!("{}_by_pub", collection),
-                vec!["pub_id", "pub_name"],
+                vec!["pub_id", "pub_name", "channel", "device_type"],
                 Some(bucket),
                 update_interval,
             ),
             by_format: CounterStore::new(
                 db.clone(),
                 format!("{}_by_format", collection),
-                vec!["pub_id", "pub_name", "ad_format"],
+                vec!["pub_id", "pub_name", "ad_format", "channel", "device_type"],
                 Some(bucket),
                 update_interval,
             ),
@@ -160,14 +161,19 @@ impl PublisherCounterStore {
         &self,
         pub_id: &str,
         pub_name: &str,
+        channel: Channel,
+        device_type: StatsDeviceType,
         aggregate: &PublisherCounters,
         by_format: &HashMap<&str, PublisherCounters>,
     ) {
-        self.by_pub.merge(&[pub_id, pub_name], aggregate);
+        let ch = channel.to_string();
+        let dt = device_type.to_string();
+
+        self.by_pub.merge(&[pub_id, pub_name, &ch, &dt], aggregate);
 
         for (ad_format, counters) in by_format {
             self.by_format
-                .merge(&[pub_id, pub_name, ad_format], counters);
+                .merge(&[pub_id, pub_name, ad_format, &ch, &dt], counters);
         }
     }
 
@@ -176,11 +182,16 @@ impl PublisherCounterStore {
         pub_id: &str,
         pub_name: &str,
         format: AdFormat,
+        channel: Channel,
+        device_type: StatsDeviceType,
         counters: &PublisherCounters,
     ) {
-        self.by_pub.merge(&[pub_id, pub_name], counters);
+        let ch = channel.to_string();
+        let dt = device_type.to_string();
+
+        self.by_pub.merge(&[pub_id, pub_name, &ch, &dt], counters);
         self.by_format
-            .merge(&[pub_id, pub_name, format.as_str()], counters);
+            .merge(&[pub_id, pub_name, format.as_str(), &ch, &dt], counters);
     }
 
     /// Close and flush counters

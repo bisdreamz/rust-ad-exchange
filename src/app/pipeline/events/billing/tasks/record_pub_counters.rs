@@ -41,6 +41,8 @@ impl BlockingTask<BillingEventContext, Error> for RecordPubBillingCountersTask {
             publisher.id.as_str(),
             publisher.name.as_str(),
             details.bid_ad_format,
+            details.channel,
+            details.device_type,
             &counters,
         );
 

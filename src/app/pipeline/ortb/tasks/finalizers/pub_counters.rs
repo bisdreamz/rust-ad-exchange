@@ -1,6 +1,7 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState, IdentityContext};
 use crate::core::firestore::counters::publisher::{PublisherCounterStore, PublisherCounters};
+use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -185,9 +186,14 @@ impl PubCountersTask {
 
         let is_blocked = context.block_reason.get().is_some();
 
-        let (mut aggregate, mut by_format) = {
+        let (mut aggregate, mut by_format, channel, device_type) = {
             let request = context.req.read();
-            build_counters_from_request(&request, context.identity.get(), is_blocked)
+            let (agg, fmt) =
+                build_counters_from_request(&request, context.identity.get(), is_blocked);
+            let channel = Channel::from_distribution(request.distributionchannel_oneof.as_ref());
+            let device_type =
+                StatsDeviceType::from_openrtb(request.device.as_ref().map_or(0, |d| d.devicetype));
+            (agg, fmt, channel, device_type)
         };
 
         if !is_blocked {
@@ -198,6 +204,8 @@ impl PubCountersTask {
         self.pub_store.merge(
             publisher.id.as_str(),
             publisher.name.as_str(),
+            channel,
+            device_type,
             &aggregate,
             &by_format,
         );

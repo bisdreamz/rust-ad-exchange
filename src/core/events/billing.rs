@@ -1,3 +1,4 @@
+use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use derive_builder::Builder;
 use rtb::common::DataUrl;
@@ -27,6 +28,10 @@ pub const FIELD_BID_AD_FORMAT: &str = "f";
 /// The location and invocation source of this event,
 /// see ['EventSource']
 pub const FIELD_EVENT_SOURCE: &str = "s";
+/// Url param key for the channel (Site/App/Dooh)
+pub const FIELD_CHANNEL: &str = "ch";
+/// Url param key for the device type
+pub const FIELD_DEVICE_TYPE: &str = "dt";
 
 /// Source of billing event
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, EnumString, Display)]
@@ -54,6 +59,8 @@ pub struct BillingEvent {
     pub pub_id: String,
     pub bid_ad_format: AdFormat,
     pub event_source: Option<EventSource>,
+    pub channel: Channel,
+    pub device_type: StatsDeviceType,
 }
 
 impl BillingEvent {
@@ -64,6 +71,12 @@ impl BillingEvent {
 
         let event_source_str = data_url.get_required_string(FIELD_EVENT_SOURCE)?;
         let event_source = EventSource::from_str(&event_source_str)?;
+
+        let channel_str = data_url.get_required_string(FIELD_CHANNEL)?;
+        let channel = Channel::from_str(&channel_str)?;
+
+        let device_type_str = data_url.get_required_string(FIELD_DEVICE_TYPE)?;
+        let device_type = StatsDeviceType::from_str(&device_type_str)?;
 
         Ok(BillingEventBuilder::default()
             .bid_timestamp(data_url.get_required_int(FIELD_BID_TIMESTAMP)? as u64)
@@ -76,6 +89,8 @@ impl BillingEvent {
             .pub_id(data_url.get_required_string(FIELD_PUB_ID)?)
             .bid_ad_format(bid_ad_format)
             .event_source(Some(event_source))
+            .channel(channel)
+            .device_type(device_type)
             .build()?)
     }
 
@@ -92,12 +107,13 @@ impl BillingEvent {
             .add_string(FIELD_PUB_ID, &self.pub_id)?
             .add_string(FIELD_BID_AD_FORMAT, &self.bid_ad_format.to_string())?;
 
-        if self.event_source.is_some() {
-            data_url.add_string(
-                FIELD_EVENT_SOURCE,
-                &self.event_source.as_ref().unwrap().to_string(),
-            )?;
+        if let Some(ref event_source) = self.event_source {
+            data_url.add_string(FIELD_EVENT_SOURCE, &event_source.to_string())?;
         }
+
+        data_url.add_string(FIELD_CHANNEL, &self.channel.to_string())?;
+
+        data_url.add_string(FIELD_DEVICE_TYPE, &self.device_type.to_string())?;
 
         Ok(())
     }
