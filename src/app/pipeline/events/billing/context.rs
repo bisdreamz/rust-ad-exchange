@@ -18,6 +18,9 @@ pub struct BillingEventContext {
     /// mechanism for incoming events. Then if URLs are present optionally,
     /// we will fire them for demand partners
     pub demand_urls: OnceLock<NoticeUrls>,
+    /// If this event is considered expired, by way of
+    /// either duplicate fire or TTL expiry
+    pub expired: OnceLock<bool>,
 }
 
 impl BillingEventContext {

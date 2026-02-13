@@ -2,7 +2,7 @@ use crate::app::context::StartupContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::events::billing::tasks::{
     BailIfExpiredTask, CacheNoticeUrlsValidationTask, ExtractBillingEventTask, FireDemandBurlTask,
-    ParseDataUrlTask, RecordBillingMetricsTask, RecordDemandBillingCountersTask,
+    MarkIfExpiredTask, ParseDataUrlTask, RecordBillingMetricsTask, RecordDemandBillingCountersTask,
     RecordPubBillingCountersTask, RecordShapingEventsTask,
 };
 use anyhow::{Error, anyhow, bail};
@@ -38,6 +38,7 @@ pub fn build_event_pipeline(
         .with_blocking(Box::new(CacheNoticeUrlsValidationTask::new(
             demand_url_cache,
         )))
+        .with_blocking(Box::new(MarkIfExpiredTask))
         .with_blocking(Box::new(RecordBillingMetricsTask))
         .with_blocking(Box::new(BailIfExpiredTask));
 

@@ -91,6 +91,11 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
             .unwrap_or(&EventSource::Unknown)
             .to_string();
 
+        let expired = context
+            .expired
+            .get()
+            .ok_or_else(|| anyhow!("No expired flag on context!"))?;
+
         span.record("pub_id", event.pub_id.clone());
         span.record("bidder_id", event.bidder_id.clone());
         span.record("bidder_endpoint_id", event.endpoint_id.clone());
@@ -98,10 +103,11 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
         span.record("cpm_gross", event.cpm_gross);
         span.record("cpm_cost", event.cpm_cost);
         span.record("imp_delay_secs", imp_delay.as_secs());
-        span.record("expired", context.demand_urls.get().is_none());
+        span.record("expired", expired);
         span.record("source", source.clone());
 
         let attrs = vec![
+            KeyValue::new("expired", *expired),
             KeyValue::new("pub_id", event.pub_id.clone()),
             KeyValue::new("bidder_id", event.bidder_id.clone()),
             KeyValue::new("bidder_endpoint_id", event.endpoint_id.clone()),
