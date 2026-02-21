@@ -62,5 +62,7 @@ mod schain_append;
 pub use schain_append::SchainAppendTask;
 
 mod junk_filter;
+mod tmax_offset;
 mod utils;
 pub use junk_filter::JunkFilterTask;
+pub use tmax_offset::TmaxOffsetTask;

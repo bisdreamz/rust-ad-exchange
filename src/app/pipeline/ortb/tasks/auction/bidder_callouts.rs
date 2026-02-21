@@ -357,9 +357,7 @@ impl BidderCalloutsTask {
             return Ok(());
         }
 
-        // todo enforce tmax mins and adjustments earlier
-        let mut tmax = context.req.read().tmax.min(700).max(50);
-        tmax -= 20;
+        let tmax = context.req.read().tmax;
 
         match timeout(Duration::from_millis(tmax as u64), join_all(futs)).await {
             Ok(_) => debug!("All bidders responded within timax"),

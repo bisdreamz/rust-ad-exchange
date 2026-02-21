@@ -4,13 +4,24 @@ use crate::core::firestore::counters::publisher::{PublisherCounterStore, Publish
 use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use async_trait::async_trait;
+use opentelemetry::metrics::Counter;
+use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
 use rtb::bid_request::{Device, DistributionchannelOneof, Imp};
 use rtb::{BidRequest, child_span_info, utils};
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tracing::Instrument;
+
+static COUNTER_REQUEST_BLOCKED: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    global::meter("rex:supply:requests")
+        .u64_counter("requests.blocked")
+        .with_description("Publisher requests blocked pre-auction")
+        .with_unit("1")
+        .build()
+});
 
 fn imp_formats(imp: &Imp) -> SmallVec<[&'static str; 4]> {
     let mut formats = SmallVec::new();
@@ -195,6 +206,23 @@ impl PubCountersTask {
                 StatsDeviceType::from_openrtb(request.device.as_ref().map_or(0, |d| d.devicetype));
             (agg, fmt, channel, device_type)
         };
+
+        if is_blocked {
+            let reason = context
+                .block_reason
+                .get()
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            COUNTER_REQUEST_BLOCKED.add(
+                1,
+                &[
+                    KeyValue::new("pub_id", publisher.id.clone()),
+                    KeyValue::new("channel", channel.to_string()),
+                    KeyValue::new("reason", reason),
+                ],
+            );
+        }
 
         if !is_blocked {
             let bidders = context.bidders.lock().await;

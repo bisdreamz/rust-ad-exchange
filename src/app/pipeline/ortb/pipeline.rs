@@ -80,6 +80,7 @@ fn build_rtb_pipeline(context: &StartupContext) -> Result<Pipeline<AuctionContex
             device_lookup,
         )))
         .with_blocking(Box::new(tasks::auction::AuctionIdTask))
+        .with_blocking(Box::new(tasks::auction::TmaxOffsetTask))
         .with_blocking(Box::new(tasks::auction::SchainAppendTask::new(
             config.schain.clone(),
         )))

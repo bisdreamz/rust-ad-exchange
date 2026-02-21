@@ -388,7 +388,11 @@ async fn sync_debug_handler(
 }
 
 /// Allowed origins for the sync debug endpoint
-const DEBUG_ALLOWED_ORIGINS: &[&str] = &["http://localhost:3000", "https://app.neuronicads.com"];
+const DEBUG_ALLOWED_ORIGINS: &[&str] = &[
+    "http://localhost:3000",
+    "https://app.neuronicads.com",
+    "https://ssp.neuronic.dev",
+];
 
 fn apply_debug_cors(req: &HttpRequest, response: &mut actix_web::HttpResponseBuilder) {
     let origin = req

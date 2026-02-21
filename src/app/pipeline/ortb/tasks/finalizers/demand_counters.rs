@@ -4,10 +4,21 @@ use crate::core::firestore::counters::demand::{DemandCounterStore, DemandCounter
 use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use async_trait::async_trait;
+use opentelemetry::metrics::Counter;
+use opentelemetry::{KeyValue, global};
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tracing::Instrument;
+
+static COUNTER_CALLOUT_SKIP: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    global::meter("rex:demand:callouts")
+        .u64_counter("callouts.skipped")
+        .with_description("Callouts skipped before bidder send")
+        .with_unit("1")
+        .build()
+});
 
 fn build_endpoint_counters(bidder_callout: &BidderCallout) -> Result<DemandCounters, Error> {
     let mut counters = DemandCounters::default();
@@ -85,6 +96,25 @@ impl DemandCountersTask {
             let mut bidder_errors = 0;
 
             for bidder_callout in bidder_context.callouts.iter() {
+                if let Some(skip_reason) = bidder_callout.skip_reason.get() {
+                    let outcome = match skip_reason {
+                        CalloutSkipReason::TrafficShaping => "traffic_shaping",
+                        CalloutSkipReason::QpsLimit => "qps_limit",
+                        CalloutSkipReason::EndpointRotation => "endpoint_rotation",
+                    };
+
+                    COUNTER_CALLOUT_SKIP.add(
+                        1,
+                        &[
+                            KeyValue::new("pub_id", context.pubid.clone()),
+                            KeyValue::new("channel", channel.to_string()),
+                            KeyValue::new("bidder_id", bidder_id.to_string()),
+                            KeyValue::new("endpoint", bidder_callout.endpoint.name.clone()),
+                            KeyValue::new("reason", outcome),
+                        ],
+                    );
+                }
+
                 let counters = build_endpoint_counters(bidder_callout)?;
 
                 self.store.merge_endpoint(
