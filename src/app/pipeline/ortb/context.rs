@@ -9,6 +9,7 @@ use rtb::common::DataUrl;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
@@ -183,6 +184,19 @@ pub enum PublisherBlockReason {
     TmaxTooLow,
 }
 
+/// IP, UA, client hints, referer, and cookies from the inbound HTTP request.
+#[derive(Debug, Default)]
+pub struct HttpRequestContext {
+    /// Real client IP resolved from CF-Connecting-IP → X-Forwarded-For → socket
+    pub ip: Option<IpAddr>,
+    pub user_agent: Option<String>,
+    pub sec_ch_ua: Option<String>,
+    pub sec_ch_ua_mobile: Option<bool>,
+    pub sec_ch_ua_platform: Option<String>,
+    pub referer: Option<String>,
+    pub cookies: HashMap<String, String>,
+}
+
 /// Top level auction context object which carries all context required
 /// to fullfill a request pipeline
 ///
@@ -201,8 +215,8 @@ pub struct AuctionContext {
     /// The original auction ID sent from pub, which
     /// we need to set in our response
     pub original_auction_id: String,
-    /// Cookies present on inbound request, if any
-    pub cookies: Option<HashMap<String, String>>,
+    /// HTTP request context — IP, UA, client hints, cookies
+    pub http: HttpRequestContext,
     pub identity: OnceLock<IdentityContext>,
     /// The ['Publisher'] object if the pubid value has been recognized
     pub publisher: OnceLock<Arc<Publisher>>,
@@ -225,12 +239,12 @@ impl AuctionContext {
         source: String,
         pubid: String,
         req: BidRequest,
-        cookies: Option<HashMap<String, String>>,
+        http: HttpRequestContext,
     ) -> AuctionContext {
         AuctionContext {
             original_auction_id: original_id,
             pubid,
-            cookies,
+            http,
             event_id: Uuid::new_v4().to_string(),
             source,
             req: RwLock::new(req),

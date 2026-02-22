@@ -1,5 +1,5 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext, HttpRequestContext};
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -298,7 +298,7 @@ mod tests {
             "/test".to_string(),
             "pub123".to_string(),
             original_req,
-            None,
+            HttpRequestContext::default(),
         );
 
         let endpoint = create_test_endpoint();

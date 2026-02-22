@@ -44,12 +44,7 @@ fn extract_req_buyeruid(req: &rtb::BidRequest) -> Option<String> {
 /// Extracts local uid value from cookies if present. This is likely
 /// for direct publishers such as prebid and the like
 fn extract_cookies_buyeruid(context: &AuctionContext, cookie_param: &str) -> Option<String> {
-    let cookies = match &context.cookies {
-        Some(cookies) => cookies,
-        None => return None,
-    };
-
-    cookies.get(cookie_param).cloned()
+    context.http.cookies.get(cookie_param).cloned()
 }
 
 /// Task responsible for extracting our local exchange uid value
