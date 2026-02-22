@@ -1,6 +1,6 @@
 use crate::app::http::{build_rxid_cookie, extract_cookies};
-use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
 use crate::app::pipeline::syncing::r#in::context::SyncInContext;
+use crate::app::pipeline::syncing::out::context::{SyncOutContext, SyncResponse};
 use crate::app::pipeline::syncing::utils;
 use crate::core::managers::{DemandManager, PublisherManager};
 use crate::core::usersync;
@@ -47,7 +47,10 @@ pub async fn sync_out_handler(
             response.body(html.clone())
         }
         SyncResponse::Error(err) => {
-            warn!("Error response encountered during sync out pipeline: {}", err);
+            warn!(
+                "Error response encountered during sync out pipeline: {}",
+                err
+            );
             let mut response = HttpResponse::InternalServerError();
             if let Some(uid) = local_uid {
                 response.cookie(build_rxid_cookie(uid));

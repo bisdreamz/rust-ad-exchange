@@ -5,14 +5,14 @@ use crate::app::handlers::sync::{
 };
 use crate::app::http::COOKIE_DOMAIN;
 use crate::app::lifecycle::context::StartupContext;
-use actix_web::web;
 use actix_web::HttpRequest;
+use actix_web::web;
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
+use rtb::BidRequest;
 use rtb::server::json::FastJson;
 use rtb::server::{Server, ServerConfig};
-use rtb::BidRequest;
 use tracing::{info, instrument};
 
 pub struct StartServerTask;
