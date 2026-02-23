@@ -3,5 +3,5 @@ mod pipeline;
 mod tasks;
 mod telemetry;
 
-pub use context::{AuctionContext, HttpRequestContext};
+pub use context::{AuctionContext, Extensions, HttpRequestContext};
 pub use pipeline::build_auction_pipeline;

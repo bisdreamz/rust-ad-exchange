@@ -1,4 +1,5 @@
 use crate::app::handlers::billing::billing_event_handler;
+use crate::app::handlers::profile::profile_handler;
 use crate::app::handlers::rtb::json_bid_handler;
 use crate::app::handlers::sync::{
     sync_debug_handler, sync_debug_preflight, sync_in_handler, sync_out_handler,
@@ -89,6 +90,7 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
 
         let server = Server::listen(server_cfg, move |app| {
             app.route("/hi", web::get().to(|| async { "hi!" }))
+                .route("/profile", web::get().to(profile_handler))
                 .route(
                     billing_event_path.as_str(),
                     web::get().to({

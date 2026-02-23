@@ -8,12 +8,59 @@ use rtb::bid_response::{Bid, SeatBid};
 use rtb::common::DataUrl;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::{BidRequest, BidResponse};
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
 use uuid::Uuid;
+
+/// Write-once, type-keyed extension store. Behaves like a OnceLock per type —
+/// once a type T has been set it is permanent and WILL NEVER be overwritten.
+/// Calling `set` twice for the same type is a no-op that returns false.
+/// All stored values must be Send + Sync.
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct Extensions {
+    map: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
+impl std::fmt::Debug for Extensions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Extensions")
+            .field("len", &self.map.len())
+            .finish()
+    }
+}
+
+#[allow(dead_code)]
+impl Extensions {
+    /// Stores val under type T. Returns false and drops val if T is already set.
+    /// WILL NEVER overwrite an existing value — treat this exactly as OnceLock::set.
+    pub fn set<T: Send + Sync + 'static>(&mut self, val: T) -> bool {
+        if self.map.contains_key(&TypeId::of::<T>()) {
+            return false;
+        }
+        self.map.insert(TypeId::of::<T>(), Box::new(val));
+        true
+    }
+
+    /// Returns a shared reference to the stored T, or None if not yet set.
+    pub fn get<T: 'static>(&self) -> Option<&T> {
+        self.map
+            .get(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_ref())
+    }
+
+    /// Returns a mutable reference into the stored T, or None if not yet set.
+    /// Allows mutating the value's fields — does NOT allow replacing the value.
+    pub fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.map
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_mut())
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct BidContext {
@@ -231,6 +278,10 @@ pub struct AuctionContext {
     /// from reaching auction, so we may persist these
     /// stats as individually reportable
     pub block_reason: OnceLock<PublisherBlockReason>,
+    /// Write-once extension store — for attaching pipeline-extension data without
+    /// modifying this struct. See [`Extensions`].
+    #[allow(dead_code)]
+    pub ext: Extensions,
 }
 
 impl AuctionContext {
