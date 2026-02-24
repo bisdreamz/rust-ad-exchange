@@ -15,7 +15,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[actix_web::main]
 async fn main() {
-    rustls::crypto::ring::default_provider()
+    rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
 

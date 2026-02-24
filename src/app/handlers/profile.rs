@@ -8,7 +8,8 @@ pub async fn profile_handler() -> HttpResponse {
     {
         Ok(g) => g,
         Err(e) => {
-            return HttpResponse::InternalServerError().body(format!("profiler start error: {}", e));
+            return HttpResponse::InternalServerError()
+                .body(format!("profiler start error: {}", e));
         }
     };
 
