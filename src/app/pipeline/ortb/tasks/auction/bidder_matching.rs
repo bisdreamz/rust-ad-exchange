@@ -3,7 +3,7 @@ use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use crate::core::managers::DemandManager;
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::spec::nobidreasons;
-use anyhow::{Error, bail};
+use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::BidRequest;
@@ -132,6 +132,19 @@ fn matches_endpoint(
         }
     }
 
+    if !targeting.os.is_empty() {
+        let os_match = context
+            .device
+            .get()
+            .map(|d| targeting.os.contains(&d.os))
+            .unwrap_or(false);
+
+        if !os_match {
+            span.record("bidder_endpoint_filter_reason", "os_type");
+            return false;
+        }
+    }
+
     if !targeting.pubs.is_empty() && !targeting.pubs.contains(&context.pubid) {
         span.record("bidder_endpoint_filter_reason", "publisher_id");
 
@@ -207,7 +220,10 @@ impl BidderMatchingTask {
                 desc: Some(msg),
             };
 
-            context.res.set(brs).expect("Shouldnt have brs");
+            context
+                .res
+                .set(brs)
+                .map_err(|_| anyhow!("Failed to set bid response state"))?;
 
             bail!(msg);
         }

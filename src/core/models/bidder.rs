@@ -1,3 +1,4 @@
+use crate::core::enrichment::device::Os;
 use crate::core::models::shaping::TrafficShaping;
 use crate::core::models::sync::SyncConfig;
 use derive_builder::Builder;
@@ -70,6 +71,8 @@ pub struct Targeting {
     pub geos: Vec<String>,
     /// Specific publishers only or all if empty
     pub pubs: Vec<String>,
+    /// Specific OS types or all if empty
+    pub os: Vec<Os>,
     pub formats: TargetingFormats,
     /// Enable channels
     pub channels: TargetingChannelTypes,

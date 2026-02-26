@@ -6,7 +6,7 @@ use pipeline::BlockingTask;
 use rtb::bid_request::Device;
 use rtb::child_span_info;
 use rtb::common::bidresponsestate::BidResponseState;
-use tracing::{Span, debug};
+use tracing::Span;
 
 pub struct DeviceLookupTask {
     lookup: DeviceLookup,
@@ -35,43 +35,39 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
         )
         .entered();
 
-        let req_borrow = context.req.read();
-        let dev_borrow = req_borrow.device.as_ref().expect("Should have device!");
-        let ua = &dev_borrow.ua;
+        // read lock scoped here — must be released before write lock below or deadlocks
+        let (ua, is_complete) = {
+            let req = context.req.read();
+            let dev = req
+                .device
+                .as_ref()
+                .ok_or_else(|| anyhow!("Missing device on bid request"))?;
+            (dev.ua.clone(), Self::already_complete(dev))
+        };
 
-        span.record("user_agent", ua);
+        span.record("user_agent", &ua);
 
-        if Self::already_complete(&dev_borrow) {
-            span.record("dev_lookup_result", "skipped_complete");
-            return Ok(());
-        }
-
-        let device_opt = self.lookup.lookup_ua(&ua);
-
-        if device_opt.is_none() {
-            let brs = BidResponseState::NoBidReason {
-                reqid: context.original_auction_id.clone(),
-                nbr: rtb::spec::openrtb::nobidreason::UNSUPPORTED_DEVICE,
-                desc: "Unrecognized user-agent string".into(),
-            };
-
-            context
-                .res
-                .set(brs)
-                .expect("Someone already set a BidResponseState!");
-
-            context
-                .block_reason
-                .set(PublisherBlockReason::DeviceUnknown)
-                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
-
-            span.record("dev_lookup_result", "no_ua_result");
-            parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_unknown");
-
-            return Err(anyhow!("Unrecognized device ua"));
-        }
-
-        let device = device_opt.unwrap();
+        let device = match self.lookup.lookup_ua(&ua) {
+            None => {
+                let brs = BidResponseState::NoBidReason {
+                    reqid: context.original_auction_id.clone(),
+                    nbr: rtb::spec::openrtb::nobidreason::UNSUPPORTED_DEVICE,
+                    desc: "Unrecognized user-agent string".into(),
+                };
+                context
+                    .res
+                    .set(brs)
+                    .map_err(|_| anyhow!("BidResponseState already set"))?;
+                context
+                    .block_reason
+                    .set(PublisherBlockReason::DeviceUnknown)
+                    .map_err(|_| anyhow!("block_reason already set"))?;
+                span.record("dev_lookup_result", "no_ua_result");
+                parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_unknown");
+                return Err(anyhow!("Unrecognized device ua"));
+            }
+            Some(d) => d,
+        };
 
         if device.devtype == DeviceType::Bot {
             let brs = BidResponseState::NoBidReason {
@@ -79,27 +75,28 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
                 nbr: rtb::spec::openrtb::nobidreason::KNOWN_WEB_CRAWLER,
                 desc: "Detected ua bot".into(),
             };
-
             context
                 .res
                 .set(brs)
-                .expect("Someone already set a BidResponseState!");
-
+                .map_err(|_| anyhow!("BidResponseState already set"))?;
             context
                 .block_reason
                 .set(PublisherBlockReason::DeviceBot)
-                .map_err(|_| anyhow!("Failed to attach block pub reason on ctx"))?;
-
+                .map_err(|_| anyhow!("block_reason already set"))?;
             span.record("dev_lookup_result", "bot");
             parent_span.record(telemetry::SPAN_REQ_BLOCK_REASON, "ua_bot");
-
             return Err(anyhow!("Bot user-agent"));
         }
 
-        drop(req_borrow); // very important or deadlocks!
+        span.record("dev_os", device.os.as_str());
+        span.record("dev_type", tracing::field::debug(&device.devtype));
 
-        let mut req_mut = context.req.write();
-        let dev_mut = req_mut.device.as_mut().unwrap();
+        context.device.set(device.clone()).ok();
+
+        if is_complete {
+            span.record("dev_lookup_result", "skipped_complete");
+            return Ok(());
+        }
 
         let rtb_dev_type = match device.devtype {
             DeviceType::Desktop => rtb::spec::adcom::devicetype::PERSONAL_COMPUTER,
@@ -108,28 +105,31 @@ impl BlockingTask<AuctionContext, Error> for DeviceLookupTask {
             DeviceType::Tablet => rtb::spec::adcom::devicetype::TABLET,
             DeviceType::Tv => rtb::spec::adcom::devicetype::CONNECTED_TV,
             DeviceType::Unknown => rtb::spec::adcom::devicetype::MOBILE_TABLET_GENERAL,
-            DeviceType::Bot => panic!("Bot hit in switch but shouldnt be possible!"),
+            DeviceType::Bot => {
+                return Err(anyhow!("Bot reached RTB device type mapping unexpectedly"));
+            }
         };
 
-        debug!("Injecting device details: {:?}", device);
+        let mut req_mut = context.req.write();
+        let dev_mut = req_mut
+            .device
+            .as_mut()
+            .ok_or_else(|| anyhow!("Missing device on bid request during write"))?;
 
-        if device.os.is_some() {
-            dev_mut.os = device.os.unwrap();
-            span.record("dev_os", &dev_mut.os);
+        if !device.os_raw.is_empty() {
+            dev_mut.os = device.os_raw.to_string();
         }
-
-        if device.model.is_some() {
-            dev_mut.model = device.model.unwrap();
+        if let Some(model) = device.model {
+            dev_mut.model = model;
             span.record("dev_model", &dev_mut.model);
         }
-
-        if device.brand.is_some() {
-            dev_mut.make = device.brand.unwrap();
+        if let Some(brand) = device.brand {
+            dev_mut.make = brand;
             span.record("dev_make", &dev_mut.make);
         }
 
         dev_mut.devicetype = rtb_dev_type as i32;
-        span.record("dev_type", tracing::field::debug(device.devtype));
+        span.record("dev_lookup_result", "enriched");
 
         Ok(())
     }

@@ -1,4 +1,9 @@
+use crate::core::enrichment::device::DeviceInfo;
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::models::campaign::Campaign;
+use crate::core::models::creative::Creative;
+use crate::core::models::deal::Deal;
+use crate::core::models::placement::Placement;
 use crate::core::models::publisher::Publisher;
 use crate::core::shaping::tree::TreeShaper;
 use derivative::Derivative;
@@ -62,6 +67,17 @@ impl Extensions {
     }
 }
 
+/// Present on a [`BidContext`] when the bid originated from a
+/// direct campaign rather than an RTB demand callout. Carries
+/// the full objects so downstream logic (counters, billing,
+/// settlement) can attribute and render without extra lookups
+#[derive(Debug, Clone)]
+pub struct DirectCampaignContext {
+    pub campaign: Arc<Campaign>,
+    pub creative: Arc<Creative>,
+    pub deal: Option<Arc<Deal>>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct BidContext {
     pub bid_event_id: String,
@@ -76,6 +92,11 @@ pub struct BidContext {
     /// Structured notification URLs which tasks may optionally attach metadata to,
     ///and retrieve later post adm pixel/burl/etc firing
     pub notifications: NoticeUrls,
+    /// Set when this bid was synthesized from a direct campaign
+    /// rather than received from an RTB callout. All downstream
+    /// logic iterates bids uniformly — check this to distinguish
+    /// source or access campaign/creative details
+    pub direct: OnceLock<DirectCampaignContext>,
 }
 
 impl BidContext {
@@ -264,9 +285,13 @@ pub struct AuctionContext {
     pub original_auction_id: String,
     /// HTTP request context — IP, UA, client hints, cookies
     pub http: HttpRequestContext,
+    pub device: OnceLock<DeviceInfo>,
     pub identity: OnceLock<IdentityContext>,
     /// The ['Publisher'] object if the pubid value has been recognized
     pub publisher: OnceLock<Arc<Publisher>>,
+    /// Resolved placement for this request. Set by upstream handlers that already
+    /// performed the lookup (jstag, prebid, etc.) so pipeline tasks don't repeat it.
+    pub placement: OnceLock<Arc<Placement>>,
     /// Locally assigned but globally unique identifier for this auction
     pub event_id: String,
     /// Tag to describe the inbound source of this request, e.g. rtb, rtb_protobuf, prebid, etc

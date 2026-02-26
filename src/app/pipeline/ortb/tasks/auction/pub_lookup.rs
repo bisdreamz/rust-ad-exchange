@@ -114,6 +114,12 @@ impl BlockingTask<AuctionContext, Error> for PubLookupTask {
 
         span.record("pub_id", &context.pubid);
 
+        // upstream handlers (jstag, prebid, etc.) may have already resolved and set
+        // the publisher — skip the manager lookup but still validate enabled status
+        if let Some(publisher) = context.publisher.get() {
+            return record_and_bail_if_disabled(context, publisher);
+        }
+
         let publisher = self.lookup_pub_or_bail(&context)?;
 
         record_and_bail_if_disabled(context, &publisher)?;

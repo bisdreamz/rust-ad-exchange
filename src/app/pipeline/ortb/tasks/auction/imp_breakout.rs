@@ -1,5 +1,5 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext, HttpRequestContext};
+use crate::app::pipeline::ortb::context::{BidderCallout, BidderContext};
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;

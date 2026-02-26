@@ -1,4 +1,12 @@
+pub mod advertiser;
 pub mod bidder;
+pub mod campaign;
+pub mod common;
+pub mod creative;
+pub mod deal;
+pub mod placement;
+pub mod property;
 pub mod publisher;
 pub mod shaping;
 pub mod sync;
+pub mod targeting;

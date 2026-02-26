@@ -1,4 +1,5 @@
-use crate::core::enrichment::device::{DeviceInfo, DeviceType};
+use crate::core::enrichment::device::{DeviceInfo, DeviceType, Os};
+use compact_str::CompactString;
 use rust_device_detector::device_detector::{DeviceDetector, KnownDevice};
 
 pub struct DeviceLookupOld {
@@ -87,7 +88,7 @@ impl DeviceLookupOld {
 
         let mut brand: Option<String> = None;
         let mut model: Option<String> = None;
-        let mut os: Option<String> = None;
+        let mut os_raw = CompactString::default();
         let devtype = Self::extract_devtype(known_device);
 
         if let Some(device) = &known_device.device {
@@ -96,14 +97,17 @@ impl DeviceLookupOld {
         }
 
         if let Some(dos) = &known_device.os {
-            os = Some(dos.name.clone());
+            os_raw = CompactString::from(&dos.name);
         }
+
+        let os = Os::parse(&os_raw);
 
         println!("15. creating final DeviceInfo");
         Some(DeviceInfo {
             brand,
             model,
             os,
+            os_raw,
             devtype,
         })
     }
