@@ -1,5 +1,6 @@
 pub mod advertiser;
 pub mod bidder;
+pub mod buyer;
 pub mod campaign;
 pub mod common;
 pub mod creative;

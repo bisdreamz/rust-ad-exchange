@@ -1,4 +1,4 @@
-use crate::core::demand::notifications::NoticeUrls;
+use crate::core::demand::notifications::CachedBidNotice;
 use crate::core::events::billing::BillingEvent;
 use rtb::common::DataUrl;
 use std::sync::OnceLock;
@@ -12,12 +12,11 @@ pub struct BillingEventContext {
     pub data_url: OnceLock<DataUrl>,
     /// The common event details
     pub details: OnceLock<BillingEvent>,
-    /// The extracted ['NoticeUrls'] from the billing event cache. This
-    /// should always be extracted, even if the urls are None, because
-    /// we also use the presence of this notice container as a de-dupe
-    /// mechanism for incoming events. Then if URLs are present optionally,
-    /// we will fire them for demand partners
-    pub demand_urls: OnceLock<NoticeUrls>,
+    /// The cached bid notice extracted from the event cache.
+    /// Presence indicates a valid (non-expired, non-duplicate) event.
+    /// Contains demand notice URLs, optional direct campaign details,
+    /// and optional deal context (for both direct and RTB bids).
+    pub bid_notice: OnceLock<CachedBidNotice>,
     /// If this event is considered expired, by way of
     /// either duplicate fire or TTL expiry
     pub expired: OnceLock<bool>,

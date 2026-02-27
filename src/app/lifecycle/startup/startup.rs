@@ -5,6 +5,7 @@ use crate::app::startup::tasks::bidders_load::BidderManagerLoadTask;
 use crate::app::startup::tasks::cluster::ClusterDiscoveryTask;
 use crate::app::startup::tasks::counter_stores::CounterStoresTask;
 use crate::app::startup::tasks::demand_url_cache::DemandUrlCacheStartTask;
+use crate::app::startup::tasks::direct_managers_load::DirectManagersLoadTask;
 use crate::app::startup::tasks::device_load::DeviceLookupLoadTask;
 use crate::app::startup::tasks::event_pipeline::BuildEventPipelineTask;
 use crate::app::startup::tasks::firestore::FirestoreTask;
@@ -16,6 +17,7 @@ use crate::app::startup::tasks::shapers_load::ShapersManagerLoadTask;
 use crate::app::startup::tasks::start_server::StartServerTask;
 use crate::app::startup::tasks::sync_pipelines::BuildSyncPipelinesTask;
 use crate::app::startup::tasks::sync_store_init::SyncStoreInitTask;
+use crate::app::startup::tasks::tracker_init::TrackerInitTask;
 use crate::core::config_manager::ConfigManager;
 use pipeline::{Pipeline, PipelineBuilder};
 use std::path::PathBuf;
@@ -42,6 +44,8 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .with_async(Box::new(ClusterDiscoveryTask))
         .with_async(Box::new(FirestoreTask))
         .with_blocking(Box::new(CounterStoresTask))
+        .with_async(Box::new(TrackerInitTask))
+        .with_async(Box::new(DirectManagersLoadTask))
         .with_async(Box::new(BidderManagerLoadTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(ShapersManagerLoadTask))
         .with_async(Box::new(PubsManagerLoadTask::new(cfg_manager.clone())))

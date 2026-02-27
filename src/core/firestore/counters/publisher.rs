@@ -1,3 +1,4 @@
+use crate::core::firestore::counters::campaign::CampaignCounters;
 use crate::core::firestore::counters::store::CounterStore;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
 use crate::core::spec::{Channel, StatsDeviceType};
@@ -130,6 +131,10 @@ impl CounterBuffer for PublisherCounters {
 pub struct PublisherCounterStore {
     by_pub: Arc<CounterStore<PublisherCounters>>,
     by_format: Arc<CounterStore<PublisherCounters>>,
+    /// Detail tier — scoped under publishers/{pub_id}/stats_by_detail.
+    /// Covers both RTB and direct sources. Uses CampaignCounters
+    /// (auctions/bids/bids_filtered/impressions/revenue/cost).
+    by_detail: Arc<CounterStore<CampaignCounters>>,
 }
 
 impl PublisherCounterStore {
@@ -153,6 +158,24 @@ impl PublisherCounterStore {
                 vec!["pub_id", "pub_name", "ad_format", "channel", "device_type"],
                 Some(bucket),
                 update_interval,
+            ),
+            by_detail: CounterStore::new_with_collection_fn(
+                db,
+                format!("{}_detail", collection),
+                vec![
+                    "pub_id",
+                    "campaign_id",
+                    "buyer_id",
+                    "buyer_name",
+                    "deal_id",
+                    "dev_type",
+                    "dev_os",
+                    "country",
+                    "source",
+                ],
+                Some(bucket),
+                update_interval,
+                Box::new(|values| format!("publishers/{}/stats_by_detail", values[0])),
             ),
         }
     }
@@ -194,9 +217,41 @@ impl PublisherCounterStore {
             .merge(&[pub_id, pub_name, format.as_str(), &ch, &dt], counters);
     }
 
+    /// Record detail-tier stats for publisher dashboard.
+    /// For RTB source: campaign_id, buyer_id, buyer_name should be empty.
+    pub fn merge_detail(
+        &self,
+        pub_id: &str,
+        campaign_id: &str,
+        buyer_id: &str,
+        buyer_name: &str,
+        deal_id: &str,
+        dev_type: &str,
+        dev_os: &str,
+        country: &str,
+        source: &str,
+        buffer: &CampaignCounters,
+    ) {
+        self.by_detail.merge(
+            &[
+                pub_id,
+                campaign_id,
+                buyer_id,
+                buyer_name,
+                deal_id,
+                dev_type,
+                dev_os,
+                country,
+                source,
+            ],
+            buffer,
+        );
+    }
+
     /// Close and flush counters
     pub async fn shutdown(&self) {
         self.by_pub.shutdown().await;
         self.by_format.shutdown().await;
+        self.by_detail.shutdown().await;
     }
 }

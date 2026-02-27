@@ -30,15 +30,16 @@ impl BlockingTask<BillingEventContext, Error> for CacheNoticeUrlsValidationTask 
             .ok_or_else(|| anyhow!("No details on billing context!"))?;
 
         match self.cache.get(&billing_event.bid_event_id) {
-            Some(event) => {
+            Some(notice) => {
                 debug!(
                     "Received valid billing event id {}",
                     billing_event.bid_event_id
                 );
+
                 context
-                    .demand_urls
-                    .set(event)
-                    .map_err(|_| anyhow!("demand_urls already set on context?!"))?;
+                    .bid_notice
+                    .set(notice)
+                    .map_err(|_| anyhow!("bid_notice already set on context?!"))?;
             }
             None => {
                 debug!(

@@ -92,6 +92,9 @@ pub struct BidContext {
     /// Structured notification URLs which tasks may optionally attach metadata to,
     ///and retrieve later post adm pixel/burl/etc firing
     pub notifications: NoticeUrls,
+    /// The deal this bid was matched through, if any.
+    /// Set for both direct and RTB bids.
+    pub deal: OnceLock<Arc<Deal>>,
     /// Set when this bid was synthesized from a direct campaign
     /// rather than received from an RTB callout. All downstream
     /// logic iterates bids uniformly — check this to distinguish

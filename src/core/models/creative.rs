@@ -30,6 +30,13 @@ pub enum CreativeFormat {
 }
 
 impl CreativeFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Banner { .. } => "banner",
+            Self::Video => "video",
+        }
+    }
+
     pub fn kind(&self) -> CreativeKind {
         match self {
             Self::Video => CreativeKind::VastXml,

@@ -29,9 +29,7 @@ pub fn qps_budget_boost(
     avail_qps_pool: u32,
 ) -> u32 {
     if budget_limit_qps == 0 {
-        return avail_qps_pool
-            .saturating_sub(passing_qps)
-            .saturating_sub(exploratory_qps);
+        return avail_qps_pool; // pool already net of passing + exploratory at call site
     }
 
     budget_limit_qps

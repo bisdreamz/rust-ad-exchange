@@ -2,6 +2,7 @@ use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{
     BidContext, BidResponseContext, BidderResponseState, PublisherBlockReason,
 };
+use crate::core::enrichment::device::Os;
 use crate::core::events::billing::{BillingEvent, BillingEventBuilder};
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::spec::{Channel, StatsDeviceType};
@@ -23,6 +24,8 @@ fn build_billing_event(
     bid_context: &BidContext,
     channel: Channel,
     device_type: StatsDeviceType,
+    country: &str,
+    device_os: Os,
 ) -> Result<BillingEvent, Error> {
     let ad_format = match detect_ad_format(&bid_context.bid) {
         Some(ad_format) => ad_format,
@@ -49,6 +52,8 @@ fn build_billing_event(
         .bid_ad_format(ad_format)
         .channel(channel)
         .device_type(device_type)
+        .country(country.to_string())
+        .device_os(device_os)
         .build()
         .map_err(Error::from)
 }
@@ -63,6 +68,8 @@ fn build_event_url(
     endpoint: &Endpoint,
     channel: Channel,
     device_type: StatsDeviceType,
+    country: &str,
+    device_os: Os,
 ) -> Result<DataUrl, Error> {
     let billing_event_result = build_billing_event(
         event_id,
@@ -72,6 +79,8 @@ fn build_event_url(
         &bid_context,
         channel,
         device_type,
+        country,
+        device_os,
     );
 
     let billing_event = match billing_event_result {
@@ -124,6 +133,8 @@ fn attach_event_handler_urls(
     bid_response: &mut BidResponseContext,
     channel: Channel,
     device_type: StatsDeviceType,
+    country: &str,
+    device_os: Os,
 ) -> bool {
     let mut total = 0;
     let mut errs = 0;
@@ -146,6 +157,8 @@ fn attach_event_handler_urls(
                 endpoint,
                 channel,
                 device_type,
+                country,
+                device_os.clone(),
             ) {
                 Ok(billing_data_url) => billing_data_url,
                 Err(e) => {
@@ -201,13 +214,25 @@ impl NotificationsUrlCreationTask {
 
 impl NotificationsUrlCreationTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
-        let (channel, device_type) = {
+        let (channel, device_type, country) = {
             let request = context.req.read();
             let channel = Channel::from_distribution(request.distributionchannel_oneof.as_ref());
             let device_type =
                 StatsDeviceType::from_openrtb(request.device.as_ref().map_or(0, |d| d.devicetype));
-            (channel, device_type)
+            let country = request
+                .device
+                .as_ref()
+                .and_then(|d| d.geo.as_ref())
+                .map(|g| g.country.clone())
+                .unwrap_or_default();
+            (channel, device_type, country)
         };
+
+        let device_os = context
+            .device
+            .get()
+            .map(|d| d.os.clone())
+            .unwrap_or_default();
 
         let mut bidders = context.bidders.lock().await;
 
@@ -244,6 +269,8 @@ impl NotificationsUrlCreationTask {
                     bid_response_context,
                     channel,
                     device_type,
+                    &country,
+                    device_os.clone(),
                 ) {
                     errs += 1;
                 }

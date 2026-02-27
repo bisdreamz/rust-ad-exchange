@@ -7,9 +7,17 @@ use crate::core::cluster::ClusterDiscovery;
 use crate::core::demand::notifications::DemandNotificationsCache;
 use crate::core::enrichment::device::DeviceLookup;
 use crate::core::filters::bot::IpRiskFilter;
+use crate::core::firestore::counters::campaign::CampaignCounterStore;
+use crate::core::firestore::counters::deal::DealCounterStore;
 use crate::core::firestore::counters::demand::DemandCounterStore;
 use crate::core::firestore::counters::publisher::PublisherCounterStore;
-use crate::core::managers::{DemandManager, PublisherManager, ShaperManager};
+use crate::core::managers::{
+    AdvertiserManager, BuyerManager, CampaignManager, CreativeManager, DealManager, DemandManager,
+    PublisherManager, ShaperManager,
+};
+use crate::app::pipeline::ortb::direct::pacing::{
+    DealImpressionTracker, DealPacer, SpendPacer, SpendTracker,
+};
 use crate::core::observability::ObservabilityProviders;
 use crate::core::usersync::SyncStore;
 use anyhow::Error;
@@ -36,6 +44,16 @@ pub struct StartupContext {
     pub bidder_manager: OnceLock<Arc<DemandManager>>,
     /// Maintains list of publishers
     pub pub_manager: OnceLock<Arc<PublisherManager>>,
+    /// Maintains list of buyer profiles (direct campaign companies)
+    pub buyer_manager: OnceLock<Arc<BuyerManager>>,
+    /// Maintains list of advertisers (brands) owned by buyers
+    pub advertiser_manager: OnceLock<Arc<AdvertiserManager>>,
+    /// Maintains list of direct campaigns
+    pub campaign_manager: OnceLock<Arc<CampaignManager>>,
+    /// Maintains list of creatives for direct campaigns
+    pub creative_manager: OnceLock<Arc<CreativeManager>>,
+    /// Maintains list of deals (direct + RTB)
+    pub deal_manager: OnceLock<Arc<DealManager>>,
     /// Traffic shaping instances per endpoint
     pub shaping_manager: OnceLock<Arc<ShaperManager>>,
     /// Caches demand provided notification URLs like burl, lurl
@@ -52,6 +70,18 @@ pub struct StartupContext {
     pub counters_pub_store: OnceLock<Option<Arc<PublisherCounterStore>>>,
     /// Optional demand specific activity counters to persist to firestore
     pub counters_demand_store: OnceLock<Option<Arc<DemandCounterStore>>>,
+    /// Optional campaign (direct) activity counters to persist to firestore
+    pub counters_campaign_store: OnceLock<Option<Arc<CampaignCounterStore>>>,
+    /// Optional deal impression counters to persist to firestore
+    pub counters_deal_store: OnceLock<Option<Arc<DealCounterStore>>>,
+    /// Campaign spend tracker for pacing decisions (Firestore or in-memory)
+    pub spend_tracker: OnceLock<Arc<dyn SpendTracker>>,
+    /// Deal impression tracker for pacing decisions (in-memory for now)
+    pub deal_tracker: OnceLock<Arc<dyn DealImpressionTracker>>,
+    /// Deal delivery pacer — wraps deal_tracker with windowed rate limiting
+    pub deal_pacer: OnceLock<Arc<dyn DealPacer>>,
+    /// Unified campaign spend pacer — reads campaign.pacing per call
+    pub spend_pacer: OnceLock<Arc<dyn SpendPacer>>,
 
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline

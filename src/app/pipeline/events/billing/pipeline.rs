@@ -2,7 +2,8 @@ use crate::app::context::StartupContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::events::billing::tasks::{
     BailIfExpiredTask, CacheNoticeUrlsValidationTask, ExtractBillingEventTask, FireDemandBurlTask,
-    MarkIfExpiredTask, ParseDataUrlTask, RecordBillingMetricsTask, RecordDemandBillingCountersTask,
+    MarkIfExpiredTask, ParseDataUrlTask, RecordBillingMetricsTask,
+    RecordCampaignBillingCountersTask, RecordDemandBillingCountersTask,
     RecordPubBillingCountersTask, RecordShapingEventsTask,
 };
 use anyhow::{Error, anyhow, bail};
@@ -31,6 +32,11 @@ pub fn build_event_pipeline(
         .counters_demand_store
         .get()
         .ok_or_else(|| anyhow!("No demand counter store option set on context"))?;
+
+    let campaign_store_opt = context
+        .counters_campaign_store
+        .get()
+        .ok_or_else(|| anyhow!("No campaign counter store option set on context"))?;
 
     let mut builder = PipelineBuilder::new()
         .with_blocking(Box::new(ParseDataUrlTask))
@@ -63,6 +69,41 @@ pub fn build_event_pipeline(
         builder.add_blocking(Box::new(RecordDemandBillingCountersTask::new(
             demand_store.clone(),
             demand_manager.clone(),
+        )));
+    }
+
+    if let Some(campaign_store) = campaign_store_opt {
+        let pub_store = pub_store_opt
+            .clone()
+            .ok_or_else(|| anyhow!("Campaign store set but no pub counter store!"))?;
+
+        let buyer_manager = context
+            .buyer_manager
+            .get()
+            .ok_or_else(|| anyhow!("Campaign store set but no buyer manager!"))?;
+
+        let advertiser_manager = context
+            .advertiser_manager
+            .get()
+            .ok_or_else(|| anyhow!("Campaign store set but no advertiser manager!"))?;
+
+        let spend_tracker = context
+            .spend_tracker
+            .get()
+            .ok_or_else(|| anyhow!("Campaign store set but no spend tracker!"))?;
+
+        let deal_pacer = context
+            .deal_pacer
+            .get()
+            .ok_or_else(|| anyhow!("Campaign store set but no deal pacer!"))?;
+
+        builder.add_blocking(Box::new(RecordCampaignBillingCountersTask::new(
+            campaign_store.clone(),
+            pub_store,
+            buyer_manager.clone(),
+            advertiser_manager.clone(),
+            spend_tracker.clone(),
+            deal_pacer.clone(),
         )));
     }
 

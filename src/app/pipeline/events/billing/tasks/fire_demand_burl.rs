@@ -14,23 +14,24 @@ impl FireDemandBurlTask {
     async fn run0(&self, context: &BillingEventContext) -> Result<(), Error> {
         let span = Span::current();
 
-        let notice_urls = match context.demand_urls.get() {
-            Some(urls) => urls,
+        let notice = match context.bid_notice.get() {
+            Some(n) => n,
             None => {
                 warn!(
-                    "No notice URLs on event context when firing BURL task. This should not happen!"
+                    "No bid notice on event context when firing BURL task. This should not happen!"
                 );
 
-                bail!("No notice URLs!");
+                bail!("No bid notice!");
             }
         };
 
-        if notice_urls.burl.is_none() {
-            debug!("No demand burl present on event, skipping burl fire");
-            return Ok(());
-        }
-
-        let burl = notice_urls.burl.as_ref().unwrap();
+        let burl = match &notice.urls.burl {
+            Some(b) => b,
+            None => {
+                debug!("No demand burl present on event, skipping burl fire");
+                return Ok(());
+            }
+        };
 
         span.record("demand_burl", burl.as_str());
 

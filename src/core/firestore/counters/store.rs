@@ -44,6 +44,11 @@ pub struct CounterEntry<C: CounterBuffer> {
     pub counters: C,
 }
 
+/// Derives the Firestore collection path from entry field values.
+/// When not set, the static `collection` string is used for all entries.
+/// When set, each entry can write to a different collection (e.g. subcollections).
+type CollectionFn = Box<dyn Fn(&[String]) -> String + Send + Sync>;
+
 /// Generic counter store. Field names are fixed at construction,
 /// callers pass values in the same order to `get()`.
 /// Flush writes each entry as a single Firestore update+transform.
@@ -55,6 +60,7 @@ pub struct CounterStore<C: CounterBuffer> {
     time_bucket: Option<Duration>,
     update_interval: Duration,
     shutdown: Notify,
+    collection_fn: Option<CollectionFn>,
 }
 
 impl<C: CounterBuffer> CounterStore<C> {
@@ -70,6 +76,45 @@ impl<C: CounterBuffer> CounterStore<C> {
         time_bucket: Option<Duration>,
         update_interval: Duration,
     ) -> Arc<Self> {
+        Self::create(
+            db,
+            collection,
+            field_names,
+            time_bucket,
+            update_interval,
+            None,
+        )
+    }
+
+    /// Like `new()` but with a function that derives the Firestore collection
+    /// path from each entry's field values. Used for subcollection writes
+    /// (e.g. `campaigns/{id}/stats`).
+    pub fn new_with_collection_fn(
+        db: Arc<FirestoreDb>,
+        collection: String,
+        field_names: Vec<&'static str>,
+        time_bucket: Option<Duration>,
+        update_interval: Duration,
+        collection_fn: CollectionFn,
+    ) -> Arc<Self> {
+        Self::create(
+            db,
+            collection,
+            field_names,
+            time_bucket,
+            update_interval,
+            Some(collection_fn),
+        )
+    }
+
+    fn create(
+        db: Arc<FirestoreDb>,
+        collection: String,
+        field_names: Vec<&'static str>,
+        time_bucket: Option<Duration>,
+        update_interval: Duration,
+        collection_fn: Option<CollectionFn>,
+    ) -> Arc<Self> {
         let store = Arc::new(CounterStore {
             db,
             collection,
@@ -78,6 +123,7 @@ impl<C: CounterBuffer> CounterStore<C> {
             time_bucket,
             update_interval,
             shutdown: Notify::new(),
+            collection_fn,
         });
 
         let self_clone = store.clone();
@@ -258,12 +304,17 @@ impl<C: CounterBuffer> CounterStore<C> {
 
             pending_docs.insert(doc_id.clone(), (key.clone(), values.clone(), buffer));
 
+            let col = match &self.collection_fn {
+                Some(f) => f(&values),
+                None => self.collection.clone(),
+            };
+
             let result = self
                 .db
                 .fluent()
                 .update()
                 .fields(mask)
-                .in_col(&self.collection)
+                .in_col(&col)
                 .document_id(&doc_id)
                 .object(&doc)
                 .transforms(|t| {

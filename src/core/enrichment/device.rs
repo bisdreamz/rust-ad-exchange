@@ -5,6 +5,7 @@ use fast_uaparser::{Device, OperatingSystem};
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
+use strum::{Display, EnumString};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DeviceType {
@@ -18,7 +19,10 @@ pub enum DeviceType {
     SetTop,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, EnumString, Display,
+)]
+#[strum(ascii_case_insensitive)]
 pub enum Os {
     Ios,
     Android,

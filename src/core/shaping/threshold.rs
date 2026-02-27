@@ -9,6 +9,8 @@ use tokio::time::Instant;
 use tracing::warn;
 
 fn calculate_effective_qps(duration_ms: u64, requests: u64) -> u32 {
+    // guard against a 0ms tick interval (first interval tick fires immediately)
+    let duration_ms = duration_ms.max(1);
     let multiplier = 1000.0.div(duration_ms as f32);
     let reqs_float = requests as f32;
 

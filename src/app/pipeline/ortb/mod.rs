@@ -1,4 +1,5 @@
 mod context;
+pub mod direct;
 mod pipeline;
 pub mod targeting;
 mod tasks;

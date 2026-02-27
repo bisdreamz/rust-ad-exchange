@@ -1,3 +1,4 @@
+use crate::core::enrichment::device::Os;
 use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use derive_builder::Builder;
@@ -32,6 +33,10 @@ pub const FIELD_EVENT_SOURCE: &str = "s";
 pub const FIELD_CHANNEL: &str = "ch";
 /// Url param key for the device type
 pub const FIELD_DEVICE_TYPE: &str = "dt";
+/// Url param key for the country code (ISO 3166-1 alpha-3)
+pub const FIELD_COUNTRY: &str = "co";
+/// Url param key for the device OS
+pub const FIELD_DEVICE_OS: &str = "os";
 
 /// Source of billing event
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, EnumString, Display)]
@@ -61,6 +66,8 @@ pub struct BillingEvent {
     pub event_source: Option<EventSource>,
     pub channel: Channel,
     pub device_type: StatsDeviceType,
+    pub country: String,
+    pub device_os: Os,
 }
 
 impl BillingEvent {
@@ -78,6 +85,15 @@ impl BillingEvent {
         let device_type_str = data_url.get_required_string(FIELD_DEVICE_TYPE)?;
         let device_type = StatsDeviceType::from_str(&device_type_str)?;
 
+        let country = data_url
+            .get_required_string(FIELD_COUNTRY)
+            .unwrap_or_default();
+
+        let device_os_str = data_url
+            .get_required_string(FIELD_DEVICE_OS)
+            .unwrap_or_default();
+        let device_os = Os::from_str(&device_os_str).unwrap_or_default();
+
         Ok(BillingEventBuilder::default()
             .bid_timestamp(data_url.get_required_int(FIELD_BID_TIMESTAMP)? as u64)
             .auction_event_id(data_url.get_required_string(FIELD_AUCTION_EVENT_ID)?)
@@ -91,6 +107,8 @@ impl BillingEvent {
             .event_source(Some(event_source))
             .channel(channel)
             .device_type(device_type)
+            .country(country)
+            .device_os(device_os)
             .build()?)
     }
 
@@ -114,6 +132,9 @@ impl BillingEvent {
         data_url.add_string(FIELD_CHANNEL, &self.channel.to_string())?;
 
         data_url.add_string(FIELD_DEVICE_TYPE, &self.device_type.to_string())?;
+
+        data_url.add_string(FIELD_COUNTRY, &self.country)?;
+        data_url.add_string(FIELD_DEVICE_OS, &self.device_os.to_string())?;
 
         Ok(())
     }

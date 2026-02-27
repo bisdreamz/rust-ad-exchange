@@ -2,7 +2,9 @@ use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{
     BidContext, BidResponseContext, BidderResponseState, PublisherBlockReason,
 };
-use crate::core::demand::notifications::{DemandNotificationsCache, NoticeUrls};
+use crate::core::demand::notifications::{
+    CachedBidNotice, DemandNotificationsCache, DirectCampaignDetails, NoticeUrls,
+};
 use crate::core::events;
 use crate::core::events::{billing, macros};
 use anyhow::{Error, anyhow, bail};
@@ -147,11 +149,23 @@ impl NotificationsUrlInjectionTask {
             "Bid event id should never be empty"
         );
 
+        let direct = bid_context.direct.get().map(|d| DirectCampaignDetails {
+            campaign: Arc::clone(&d.campaign),
+            creative: Arc::clone(&d.creative),
+            deal: d.deal.clone(),
+        });
+
+        let deal = bid_context.deal.get().cloned();
+
         self.demand_url_cache.cache(
             &bid_context.bid_event_id,
-            NoticeUrls {
-                burl: demand_burl_opt,
-                lurl: None,
+            CachedBidNotice {
+                urls: NoticeUrls {
+                    burl: demand_burl_opt,
+                    lurl: None,
+                },
+                direct,
+                deal,
             },
         );
 

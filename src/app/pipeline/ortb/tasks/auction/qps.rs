@@ -96,9 +96,9 @@ impl QpslimiterTask {
                             .iter()
                             .find(|p| p.name == ep.name)
                             .map(|p| p.qps);
-                        if prev_qps != Some(ep.qps) {
+                        if prev_qps != Some(ep.qps) || !map.contains_key(&ep.name) {
                             debug!(
-                                "Endpoint {} QPS changed {:?} -> {}, recreating limiter",
+                                "Endpoint {} QPS {:?} -> {}, recreating limiter",
                                 ep.name, prev_qps, ep.qps
                             );
                             map.insert(ep.name.clone(), create_limiter(ep, cluster_sz));

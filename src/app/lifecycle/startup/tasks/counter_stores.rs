@@ -1,4 +1,6 @@
 use crate::app::context::StartupContext;
+use crate::core::firestore::counters::campaign::CampaignCounterStore;
+use crate::core::firestore::counters::deal::DealCounterStore;
 use crate::core::firestore::counters::demand::DemandCounterStore;
 use crate::core::firestore::counters::publisher::PublisherCounterStore;
 use anyhow::{Error, anyhow};
@@ -33,6 +35,12 @@ impl BlockingTask<StartupContext, Error> for CounterStoresTask {
                 context.counters_demand_store.set(None).map_err(|_| {
                     anyhow!("Failed to set demand counter store on startup context")
                 })?;
+                context.counters_campaign_store.set(None).map_err(|_| {
+                    anyhow!("Failed to set campaign counter store on startup context")
+                })?;
+                context.counters_deal_store.set(None).map_err(|_| {
+                    anyhow!("Failed to set deal counter store on startup context")
+                })?;
             }
             Some(firestore) => {
                 let pub_store = PublisherCounterStore::new(
@@ -61,7 +69,28 @@ impl BlockingTask<StartupContext, Error> for CounterStoresTask {
                         anyhow!("Failed to set demand counter store on startup context")
                     })?;
 
-                info!("Created publisher and demand counter stores");
+                let campaign_store = CampaignCounterStore::new(
+                    firestore.clone(),
+                    "stats_direct",
+                    Duration::from_hours(1),
+                    Duration::from_mins(1),
+                );
+                context
+                    .counters_campaign_store
+                    .set(Some(Arc::new(campaign_store)))
+                    .map_err(|_| {
+                        anyhow!("Failed to set campaign counter store on startup context")
+                    })?;
+
+                let deal_store = DealCounterStore::new(firestore.clone(), Duration::from_mins(1));
+                context
+                    .counters_deal_store
+                    .set(Some(Arc::new(deal_store)))
+                    .map_err(|_| {
+                        anyhow!("Failed to set deal counter store on startup context")
+                    })?;
+
+                info!("Created publisher, demand, campaign, and deal counter stores");
             }
         }
 
