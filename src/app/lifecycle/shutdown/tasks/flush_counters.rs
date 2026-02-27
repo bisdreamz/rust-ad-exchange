@@ -32,6 +32,28 @@ impl AsyncTask<StartupContext, Error> for FlushCountersTask {
             info!("Flushed demand counters");
         }
 
+        let counters_campaign_store_opt = context
+            .counters_campaign_store
+            .get()
+            .ok_or_else(|| anyhow!("Failed to get campaign counter store from startup context"))?;
+
+        if let Some(counters_campaign_store) = counters_campaign_store_opt {
+            counters_campaign_store.shutdown().await;
+
+            info!("Flushed campaign counters");
+        }
+
+        let counters_deal_store_opt = context
+            .counters_deal_store
+            .get()
+            .ok_or_else(|| anyhow!("Failed to get deal counter store from startup context"))?;
+
+        if let Some(counters_deal_store) = counters_deal_store_opt {
+            counters_deal_store.shutdown().await;
+
+            info!("Flushed deal counters");
+        }
+
         Ok(())
     }
 }

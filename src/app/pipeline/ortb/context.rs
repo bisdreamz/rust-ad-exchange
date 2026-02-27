@@ -70,12 +70,13 @@ impl Extensions {
 /// Present on a [`BidContext`] when the bid originated from a
 /// direct campaign rather than an RTB demand callout. Carries
 /// the full objects so downstream logic (counters, billing,
-/// settlement) can attribute and render without extra lookups
+/// settlement) can attribute and render without extra lookups.
+/// Deal context (if any) lives on `BidContext.deal` for uniform
+/// access across both direct and RTB bid paths.
 #[derive(Debug, Clone)]
 pub struct DirectCampaignContext {
     pub campaign: Arc<Campaign>,
     pub creative: Arc<Creative>,
-    pub deal: Option<Arc<Deal>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -256,6 +257,7 @@ pub enum PublisherBlockReason {
 }
 
 /// IP, UA, client hints, referer, and cookies from the inbound HTTP request.
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct HttpRequestContext {
     /// Real client IP resolved from CF-Connecting-IP → X-Forwarded-For → socket

@@ -23,7 +23,6 @@ pub struct NoticeUrls {
 pub struct DirectCampaignDetails {
     pub campaign: Arc<Campaign>,
     pub creative: Arc<Creative>,
-    pub deal: Option<Arc<Deal>>,
 }
 
 /// Per-bid cache entry combining demand notice URLs with

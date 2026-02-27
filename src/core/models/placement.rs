@@ -4,9 +4,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FillPolicy {
+    /// Only deal-backed direct campaigns. No open campaigns, no RTB.
     DealsOnly,
-    DirectAndDeals,
+    /// All direct campaigns (open + deal-backed). No RTB.
+    DirectOnly,
+    /// All direct campaigns + RTB deals. No open RTB.
+    DirectAndRtbDeals,
+    /// Direct fills first, full RTB backfills remaining imps.
     RtbBackfill,
+    /// All sources compete on price.
     HighestPrice,
 }
 

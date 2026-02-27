@@ -152,7 +152,6 @@ impl NotificationsUrlInjectionTask {
         let direct = bid_context.direct.get().map(|d| DirectCampaignDetails {
             campaign: Arc::clone(&d.campaign),
             creative: Arc::clone(&d.creative),
-            deal: d.deal.clone(),
         });
 
         let deal = bid_context.deal.get().cloned();

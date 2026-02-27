@@ -1,9 +1,10 @@
 use crate::app::context::StartupContext;
 use crate::app::pipeline::ortb::direct::pacing::{
-    CampaignSpendPacer, DealImpressionTracker, EvenDealPacer, FirestoreSpendTracker,
-    InMemoryDealTracker, InMemorySpendTracker,
+    CampaignSpendPacer, DealImpressionTracker, EvenDealPacer, FirestoreDealTracker,
+    FirestoreSpendTracker, InMemoryDealTracker, InMemorySpendTracker, system_epoch_clock,
 };
 use crate::core::firestore::counters::campaign::SPEND_COLLECTION;
+use crate::core::firestore::counters::deal::DEAL_PACING_COLLECTION;
 use crate::core::providers::FirestoreProvider;
 use anyhow::{Error, anyhow};
 use async_trait::async_trait;
@@ -18,8 +19,8 @@ const DEAL_PACING_WINDOW_SECS: u64 = 60;
 const CAMPAIGN_PACING_WINDOW_SECS: u64 = 3600;
 
 /// Creates spend and deal trackers + the deal pacer based on
-/// whether Firestore is configured. Must run after CounterStoresTask
-/// and ClusterDiscoveryTask.
+/// whether Firestore is configured. Must run after CounterStoresTask,
+/// ClusterDiscoveryTask, and DirectManagersLoadTask.
 pub struct TrackerInitTask;
 
 #[async_trait]
@@ -36,6 +37,8 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
             .get()
             .ok_or_else(|| anyhow!("Cluster manager not set yet on context!"))?
             .clone();
+
+        let clock = system_epoch_clock();
 
         // --- Spend tracker ---
         match firestore_opt {
@@ -61,14 +64,23 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
         }
 
         // --- Deal impression tracker ---
-        // Always in-memory for now — no Firestore listener impl for deal pacing yet
-        let deal_tracker: Arc<dyn DealImpressionTracker> = Arc::new(InMemoryDealTracker::new());
+        let deal_tracker: Arc<dyn DealImpressionTracker> = match firestore_opt {
+            Some(db) => {
+                let provider = Arc::new(FirestoreProvider::new(db.clone(), DEAL_PACING_COLLECTION));
+                let tracker = FirestoreDealTracker::start(provider).await?;
+                info!("Started Firestore deal impression tracker");
+                tracker
+            }
+            None => {
+                info!("Using in-memory deal impression tracker");
+                Arc::new(InMemoryDealTracker::new())
+            }
+        };
+
         context
             .deal_tracker
             .set(deal_tracker.clone())
             .map_err(|_| anyhow!("Failed to set deal tracker on context"))?;
-
-        info!("Using in-memory deal impression tracker");
 
         // --- Deal pacer ---
         let cluster_for_pacer = cluster.clone();
@@ -76,6 +88,7 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
             deal_tracker,
             Box::new(move || cluster_for_pacer.cluster_size()),
             DEAL_PACING_WINDOW_SECS,
+            clock.clone(),
         ));
         context
             .deal_pacer
@@ -95,6 +108,7 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
             spend_tracker_for_pacer,
             cluster.clone(),
             CAMPAIGN_PACING_WINDOW_SECS,
+            clock,
         ));
         context
             .spend_pacer

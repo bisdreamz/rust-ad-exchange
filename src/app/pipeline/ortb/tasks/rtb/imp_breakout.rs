@@ -136,6 +136,7 @@ impl AsyncTask<AuctionContext, Error> for MultiImpBreakoutTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::pipeline::ortb::HttpRequestContext;
     use crate::core::models::bidder::Endpoint;
     use rtb::BidRequestBuilder;
     use rtb::bid_request::ImpBuilder;

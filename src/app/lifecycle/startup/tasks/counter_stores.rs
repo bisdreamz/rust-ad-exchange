@@ -38,9 +38,10 @@ impl BlockingTask<StartupContext, Error> for CounterStoresTask {
                 context.counters_campaign_store.set(None).map_err(|_| {
                     anyhow!("Failed to set campaign counter store on startup context")
                 })?;
-                context.counters_deal_store.set(None).map_err(|_| {
-                    anyhow!("Failed to set deal counter store on startup context")
-                })?;
+                context
+                    .counters_deal_store
+                    .set(None)
+                    .map_err(|_| anyhow!("Failed to set deal counter store on startup context"))?;
             }
             Some(firestore) => {
                 let pub_store = PublisherCounterStore::new(
@@ -86,9 +87,7 @@ impl BlockingTask<StartupContext, Error> for CounterStoresTask {
                 context
                     .counters_deal_store
                     .set(Some(Arc::new(deal_store)))
-                    .map_err(|_| {
-                        anyhow!("Failed to set deal counter store on startup context")
-                    })?;
+                    .map_err(|_| anyhow!("Failed to set deal counter store on startup context"))?;
 
                 info!("Created publisher, demand, campaign, and deal counter stores");
             }

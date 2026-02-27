@@ -83,3 +83,328 @@ pub fn matches_targeting(targeting: &CommonTargeting, ctx: &AuctionContext, imp:
 
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::enrichment::device::{DeviceInfoBuilder, DeviceType, Os};
+    use crate::core::models::targeting::{AllowedPropertyTypes, CommonTargeting, ListFilter};
+    use ahash::AHashSet;
+    use compact_str::CompactString;
+    use parking_lot::RwLock;
+    use rtb::BidRequestBuilder;
+    use rtb::bid_request::{DeviceBuilder, GeoBuilder, ImpBuilder, SiteBuilder};
+
+    fn default_ctx() -> AuctionContext {
+        let req = BidRequestBuilder::default()
+            .id("test".to_string())
+            .imp(vec![
+                ImpBuilder::default()
+                    .id("imp1".to_string())
+                    .build()
+                    .unwrap(),
+            ])
+            .build()
+            .unwrap();
+        AuctionContext {
+            pubid: "pub1".into(),
+            req: RwLock::new(req),
+            ..Default::default()
+        }
+    }
+
+    fn default_imp() -> Imp {
+        ImpBuilder::default()
+            .id("imp1".to_string())
+            .build()
+            .unwrap()
+    }
+
+    fn ctx_with_geo(country: &str) -> AuctionContext {
+        let geo = GeoBuilder::default()
+            .country(country.to_string())
+            .build()
+            .unwrap();
+        let device = DeviceBuilder::default().geo(geo).build().unwrap();
+        let req = BidRequestBuilder::default()
+            .id("test".to_string())
+            .imp(vec![default_imp()])
+            .device(device)
+            .build()
+            .unwrap();
+        AuctionContext {
+            pubid: "pub1".into(),
+            req: RwLock::new(req),
+            ..Default::default()
+        }
+    }
+
+    fn ctx_with_site(domain: &str) -> AuctionContext {
+        let site = SiteBuilder::default()
+            .domain(domain.to_string())
+            .build()
+            .unwrap();
+        let req = BidRequestBuilder::default()
+            .id("test".to_string())
+            .imp(vec![default_imp()])
+            .distributionchannel_oneof(DistributionchannelOneof::Site(site))
+            .build()
+            .unwrap();
+        AuctionContext {
+            pubid: "pub1".into(),
+            req: RwLock::new(req),
+            ..Default::default()
+        }
+    }
+
+    fn allow_set<T: Eq + std::hash::Hash>(vals: Vec<T>) -> ListFilter<T> {
+        ListFilter::Allow(vals.into_iter().collect())
+    }
+
+    fn deny_set<T: Eq + std::hash::Hash>(vals: Vec<T>) -> ListFilter<T> {
+        ListFilter::Deny(vals.into_iter().collect())
+    }
+
+    #[test]
+    fn default_targeting_passes() {
+        let targeting = CommonTargeting::default();
+        let ctx = default_ctx();
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn geo_allow_match() {
+        let targeting = CommonTargeting {
+            geos_filter: allow_set(vec![CompactString::from("US")]),
+            ..Default::default()
+        };
+        let ctx = ctx_with_geo("US");
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn geo_allow_reject() {
+        let targeting = CommonTargeting {
+            geos_filter: allow_set(vec![CompactString::from("US")]),
+            ..Default::default()
+        };
+        let ctx = ctx_with_geo("GB");
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn geo_deny_blocks() {
+        let targeting = CommonTargeting {
+            geos_filter: deny_set(vec![CompactString::from("CN")]),
+            ..Default::default()
+        };
+        let ctx = ctx_with_geo("CN");
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn geo_deny_passes_other() {
+        let targeting = CommonTargeting {
+            geos_filter: deny_set(vec![CompactString::from("CN")]),
+            ..Default::default()
+        };
+        let ctx = ctx_with_geo("US");
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn pub_id_allow_match() {
+        let targeting = CommonTargeting {
+            pub_id_filter: allow_set(vec![CompactString::from("pub1")]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn pub_id_allow_reject() {
+        let targeting = CommonTargeting {
+            pub_id_filter: allow_set(vec![CompactString::from("pub_other")]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn os_allow_match() {
+        let targeting = CommonTargeting {
+            dev_os_filter: allow_set(vec![Os::Ios]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let info = DeviceInfoBuilder::default()
+            .brand(None)
+            .model(None)
+            .os(Os::Ios)
+            .build()
+            .unwrap();
+        let _ = ctx.device.set(info);
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn os_allow_reject() {
+        let targeting = CommonTargeting {
+            dev_os_filter: allow_set(vec![Os::Ios]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let info = DeviceInfoBuilder::default()
+            .brand(None)
+            .model(None)
+            .os(Os::Android)
+            .build()
+            .unwrap();
+        let _ = ctx.device.set(info);
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn devtype_allow_match() {
+        let targeting = CommonTargeting {
+            dev_type_filter: allow_set(vec![DeviceType::Phone]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let info = DeviceInfoBuilder::default()
+            .brand(None)
+            .model(None)
+            .devtype(DeviceType::Phone)
+            .build()
+            .unwrap();
+        let _ = ctx.device.set(info);
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn devtype_deny_rejects() {
+        let targeting = CommonTargeting {
+            dev_type_filter: deny_set(vec![DeviceType::Bot]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let info = DeviceInfoBuilder::default()
+            .brand(None)
+            .model(None)
+            .devtype(DeviceType::Bot)
+            .build()
+            .unwrap();
+        let _ = ctx.device.set(info);
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn domain_allow_match() {
+        let targeting = CommonTargeting {
+            bundle_domain_filter: allow_set(vec![CompactString::from("example.com")]),
+            ..Default::default()
+        };
+        let ctx = ctx_with_site("example.com");
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn domain_allow_reject() {
+        let targeting = CommonTargeting {
+            bundle_domain_filter: allow_set(vec![CompactString::from("example.com")]),
+            ..Default::default()
+        };
+        let ctx = ctx_with_site("other.com");
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn placement_allow_match() {
+        let targeting = CommonTargeting {
+            placement_id_filter: allow_set(vec![CompactString::from("plc1")]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let imp = ImpBuilder::default()
+            .id("imp1".to_string())
+            .tagid("plc1".to_string())
+            .build()
+            .unwrap();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn placement_allow_reject() {
+        let targeting = CommonTargeting {
+            placement_id_filter: allow_set(vec![CompactString::from("plc1")]),
+            ..Default::default()
+        };
+        let ctx = default_ctx();
+        let imp = ImpBuilder::default()
+            .id("imp1".to_string())
+            .tagid("plc_other".to_string())
+            .build()
+            .unwrap();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn property_type_site_match() {
+        let targeting = CommonTargeting {
+            allowed_property_types: AllowedPropertyTypes::Site,
+            ..Default::default()
+        };
+        let ctx = ctx_with_site("example.com");
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn property_type_site_rejects_none() {
+        let targeting = CommonTargeting {
+            allowed_property_types: AllowedPropertyTypes::Site,
+            ..Default::default()
+        };
+        // default_ctx has no distributionchannel_oneof
+        let ctx = default_ctx();
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn empty_allow_denies_all() {
+        let targeting = CommonTargeting {
+            geos_filter: ListFilter::Allow(AHashSet::new()),
+            ..Default::default()
+        };
+        let ctx = ctx_with_geo("US");
+        let imp = default_imp();
+        assert!(!matches_targeting(&targeting, &ctx, &imp));
+    }
+
+    #[test]
+    fn empty_deny_allows_all() {
+        let targeting = CommonTargeting {
+            geos_filter: ListFilter::Deny(AHashSet::new()),
+            ..Default::default()
+        };
+        let ctx = ctx_with_geo("US");
+        let imp = default_imp();
+        assert!(matches_targeting(&targeting, &ctx, &imp));
+    }
+}

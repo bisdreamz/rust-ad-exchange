@@ -8,23 +8,17 @@ use tracing::debug;
 
 struct AdvertiserCache {
     by_id: HashMap<String, Arc<Advertiser>>,
-    by_buyer: HashMap<String, Vec<Arc<Advertiser>>>,
 }
 
 impl AdvertiserCache {
     fn build(advertisers: impl IntoIterator<Item = Arc<Advertiser>>) -> Self {
         let mut by_id = HashMap::new();
-        let mut by_buyer: HashMap<String, Vec<Arc<Advertiser>>> = HashMap::new();
 
         for adv in advertisers {
-            by_id.insert(adv.id.clone(), Arc::clone(&adv));
-            by_buyer
-                .entry(adv.buyer_id.clone())
-                .or_default()
-                .push(adv);
+            by_id.insert(adv.id.clone(), adv);
         }
 
-        AdvertiserCache { by_id, by_buyer }
+        AdvertiserCache { by_id }
     }
 }
 
@@ -37,7 +31,6 @@ impl AdvertiserManager {
         let manager = Arc::new(Self {
             cache: ArcSwap::from_pointee(AdvertiserCache {
                 by_id: HashMap::new(),
-                by_buyer: HashMap::new(),
             }),
         });
 
@@ -82,14 +75,5 @@ impl AdvertiserManager {
 
     pub fn get(&self, id: &str) -> Option<Arc<Advertiser>> {
         self.cache.load().by_id.get(id).cloned()
-    }
-
-    pub fn by_buyer(&self, buyer_id: &str) -> Vec<Arc<Advertiser>> {
-        self.cache
-            .load()
-            .by_buyer
-            .get(buyer_id)
-            .cloned()
-            .unwrap_or_default()
     }
 }

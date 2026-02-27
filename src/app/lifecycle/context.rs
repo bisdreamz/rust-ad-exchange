@@ -1,6 +1,9 @@
 use crate::app::config::RexConfig;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
+use crate::app::pipeline::ortb::direct::pacing::{
+    DealImpressionTracker, DealPacer, SpendPacer, SpendTracker,
+};
 use crate::app::pipeline::syncing::r#in::context::SyncInContext;
 use crate::app::pipeline::syncing::out::context::SyncOutContext;
 use crate::core::cluster::ClusterDiscovery;
@@ -14,9 +17,6 @@ use crate::core::firestore::counters::publisher::PublisherCounterStore;
 use crate::core::managers::{
     AdvertiserManager, BuyerManager, CampaignManager, CreativeManager, DealManager, DemandManager,
     PublisherManager, ShaperManager,
-};
-use crate::app::pipeline::ortb::direct::pacing::{
-    DealImpressionTracker, DealPacer, SpendPacer, SpendTracker,
 };
 use crate::core::observability::ObservabilityProviders;
 use crate::core::usersync::SyncStore;

@@ -110,11 +110,12 @@ impl FirestoreSpendTracker {
 }
 
 impl SpendTracker for FirestoreSpendTracker {
-    fn total_spend(&self, campaign_id: &str) -> Option<f64> {
+    fn total_spend(&self, campaign_id: &str) -> f64 {
         self.spend
             .read()
             .get(campaign_id)
             .map(|micros| *micros as f64 / MICROS_PER_DOLLAR)
+            .unwrap_or(0.0)
     }
 
     /// No-op — spend arrives indirectly:
@@ -124,17 +125,4 @@ impl SpendTracker for FirestoreSpendTracker {
     /// This tracker's Firestore listener on that same collection
     /// picks up the updated `revenue_cpm_sum` field via `SpendDoc`.
     fn record_spend(&self, _campaign_id: &str, _amount: f64) {}
-
-    /// Campaigns are registered implicitly via the Firestore listener.
-    /// Docs appearing in the `pacing_campaigns` collection are picked
-    /// up by `handle_event` and inserted into the spend map.
-    /// Explicit registration seeds the map for campaigns with no
-    /// spend doc yet (new campaigns that haven't had a counter flush).
-    fn register(&self, campaign_id: &str, initial_spend: f64) {
-        let micros = (initial_spend * MICROS_PER_DOLLAR) as u64;
-        self.spend
-            .write()
-            .entry(campaign_id.to_owned())
-            .or_insert(micros);
-    }
 }

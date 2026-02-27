@@ -119,4 +119,9 @@ pub struct Deal {
     /// Pacing strategy for deal delivery. None = no pacing.
     #[serde(default)]
     pub pacing: Option<DealPacing>,
+    /// When true, bids through this deal take settlement priority
+    /// over non-priority bids regardless of price. Multiple priority
+    /// bids self-compete on price.
+    #[serde(default)]
+    pub takes_priority: bool,
 }

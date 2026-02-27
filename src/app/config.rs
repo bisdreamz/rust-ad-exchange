@@ -1,4 +1,9 @@
+use crate::core::models::advertiser::Advertiser;
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::models::buyer::Buyer;
+use crate::core::models::campaign::Campaign;
+use crate::core::models::creative::Creative;
+use crate::core::models::deal::Deal;
 use crate::core::models::publisher::Publisher;
 use config::Config;
 use derive_builder::Builder;
@@ -83,6 +88,11 @@ pub struct RexConfig {
     pub caches: CacheConfig,
     pub bidders: Option<Vec<BidderConfig>>,
     pub publishers: Option<Vec<Publisher>>,
+    pub campaigns: Option<Vec<Campaign>>,
+    pub creatives: Option<Vec<Creative>>,
+    pub deals: Option<Vec<Deal>>,
+    pub buyers: Option<Vec<Buyer>>,
+    pub advertisers: Option<Vec<Advertiser>>,
     pub notifications: EventConfig,
     #[serde(default)]
     pub cluster: ClusterConfig,

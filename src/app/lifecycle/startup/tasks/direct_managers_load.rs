@@ -1,8 +1,17 @@
 use crate::app::context::StartupContext;
+use crate::core::config_manager::ConfigManager;
 use crate::core::managers::{
     AdvertiserManager, BuyerManager, CampaignManager, CreativeManager, DealManager,
 };
-use crate::core::providers::FirestoreProvider;
+use crate::core::models::advertiser::Advertiser;
+use crate::core::models::buyer::Buyer;
+use crate::core::models::campaign::Campaign;
+use crate::core::models::creative::Creative;
+use crate::core::models::deal::Deal;
+use crate::core::providers::{
+    ConfigAdvertiserProvider, ConfigBuyerProvider, ConfigCampaignProvider, ConfigCreativeProvider,
+    ConfigDealProvider, FirestoreProvider, Provider,
+};
 use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -10,10 +19,17 @@ use std::sync::Arc;
 use tracing::{info, instrument};
 
 /// Loads all direct-campaign entity managers (Buyer, Advertiser,
-/// Campaign, Creative, Deal) from Firestore. If Firestore is not
-/// configured, managers start with empty state — the
-/// DirectCampaignMatchingTask still runs but finds no campaigns.
-pub struct DirectManagersLoadTask;
+/// Campaign, Creative, Deal) from Firestore or config fallback.
+/// Follows the same pattern as BidderManagerLoadTask / PubsManagerLoadTask.
+pub struct DirectManagersLoadTask {
+    config_manager: Arc<ConfigManager>,
+}
+
+impl DirectManagersLoadTask {
+    pub fn new(config_manager: Arc<ConfigManager>) -> Self {
+        Self { config_manager }
+    }
+}
 
 #[async_trait]
 impl AsyncTask<StartupContext, Error> for DirectManagersLoadTask {
@@ -24,20 +40,42 @@ impl AsyncTask<StartupContext, Error> for DirectManagersLoadTask {
             .get()
             .ok_or_else(|| anyhow!("Firestore state not set"))?;
 
-        let db = match firestore_opt {
-            Some(db) => db.clone(),
+        let (camp_prov, crea_prov, deal_prov, buy_prov, adv_prov): (
+            Arc<dyn Provider<Campaign>>,
+            Arc<dyn Provider<Creative>>,
+            Arc<dyn Provider<Deal>>,
+            Arc<dyn Provider<Buyer>>,
+            Arc<dyn Provider<Advertiser>>,
+        ) = match firestore_opt {
+            Some(db) => {
+                info!("Loading direct managers from Firestore");
+                (
+                    Arc::new(FirestoreProvider::new(db.clone(), "campaigns")),
+                    Arc::new(FirestoreProvider::new(db.clone(), "creatives")),
+                    Arc::new(FirestoreProvider::new(db.clone(), "deals")),
+                    Arc::new(FirestoreProvider::new(db.clone(), "buyers")),
+                    Arc::new(FirestoreProvider::new(db.clone(), "advertisers")),
+                )
+            }
             None => {
-                info!("No Firestore configured, direct campaign managers will have empty state");
-                return Ok(());
+                info!("Loading direct managers from config");
+                let cm = &self.config_manager;
+                (
+                    Arc::new(ConfigCampaignProvider::new(cm.clone())),
+                    Arc::new(ConfigCreativeProvider::new(cm.clone())),
+                    Arc::new(ConfigDealProvider::new(cm.clone())),
+                    Arc::new(ConfigBuyerProvider::new(cm.clone())),
+                    Arc::new(ConfigAdvertiserProvider::new(cm.clone())),
+                )
             }
         };
 
         let (buyers, advertisers, campaigns, creatives, deals) = tokio::try_join!(
-            BuyerManager::start(Arc::new(FirestoreProvider::new(db.clone(), "buyers"))),
-            AdvertiserManager::start(Arc::new(FirestoreProvider::new(db.clone(), "advertisers"))),
-            CampaignManager::start(Arc::new(FirestoreProvider::new(db.clone(), "campaigns"))),
-            CreativeManager::start(Arc::new(FirestoreProvider::new(db.clone(), "creatives"))),
-            DealManager::start(Arc::new(FirestoreProvider::new(db.clone(), "deals"))),
+            BuyerManager::start(buy_prov),
+            AdvertiserManager::start(adv_prov),
+            CampaignManager::start(camp_prov),
+            CreativeManager::start(crea_prov),
+            DealManager::start(deal_prov),
         )?;
 
         context

@@ -50,4 +50,8 @@ impl DealCounterStore {
     pub fn merge(&self, deal_id: &str, buffer: &DealCounters) {
         self.by_deal.merge(&[deal_id], buffer);
     }
+
+    pub async fn shutdown(&self) {
+        self.by_deal.shutdown().await;
+    }
 }

@@ -35,8 +35,11 @@ pub fn synthesize_bid(
     let _ = bid_ctx.direct.set(DirectCampaignContext {
         campaign: Arc::clone(campaign),
         creative: Arc::clone(creative),
-        deal,
     });
+
+    if let Some(d) = deal {
+        let _ = bid_ctx.deal.set(d);
+    }
 
     bid_ctx
 }

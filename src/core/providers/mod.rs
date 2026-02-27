@@ -1,8 +1,18 @@
+mod config_advertisers;
+mod config_buyers;
+mod config_campaigns;
+mod config_creatives;
+mod config_deals;
 mod config_demand;
 mod config_publisher;
 mod firestore;
 mod provider;
 
+pub use config_advertisers::ConfigAdvertiserProvider;
+pub use config_buyers::ConfigBuyerProvider;
+pub use config_campaigns::ConfigCampaignProvider;
+pub use config_creatives::ConfigCreativeProvider;
+pub use config_deals::ConfigDealProvider;
 pub use config_demand::ConfigDemandProvider;
 pub use config_publisher::ConfigPublisherProvider;
 pub use firestore::FirestoreProvider;

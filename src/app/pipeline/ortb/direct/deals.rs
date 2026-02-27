@@ -24,3 +24,89 @@ pub fn resolve(
         .find_map(|did| deals.iter().find(|d| d.id == *did))
         .cloned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::models::campaign::{
+        Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
+    };
+    use crate::core::models::common::Status;
+    use crate::core::models::deal::{Deal, DealOwner, DealPricing, DealTargeting, DemandPolicy};
+    use crate::core::models::targeting::CommonTargeting;
+    use chrono::Utc;
+
+    fn stub_campaign(deal_ids: Vec<String>) -> Campaign {
+        Campaign {
+            status: Status::Active,
+            company_id: "co1".into(),
+            id: "c1".into(),
+            start_date: Utc::now() - chrono::Duration::hours(1),
+            end_date: Utc::now() + chrono::Duration::hours(1),
+            name: "test".into(),
+            pacing: CampaignPacing::Fast,
+            budget: 1000.0,
+            strategy: PricingStrategy::FixedPrice(5.0),
+            advertiser_id: "adv1".into(),
+            targeting: CampaignTargeting {
+                common: CommonTargeting::default(),
+                deal_ids,
+            },
+        }
+    }
+
+    fn stub_deal(id: &str) -> Deal {
+        Deal {
+            status: Status::Active,
+            id: id.into(),
+            name: "test deal".into(),
+            policy: DemandPolicy::Direct {
+                company_ids: vec!["co1".into()],
+            },
+            owner: DealOwner::Platform,
+            pricing: DealPricing::Inherit,
+            targeting: DealTargeting {
+                common: CommonTargeting::default(),
+            },
+            start_date: None,
+            end_date: None,
+            delivery_goal: None,
+            pacing: None,
+            takes_priority: false,
+        }
+    }
+
+    #[test]
+    fn empty_deal_ids_returns_none() {
+        let c = stub_campaign(vec![]);
+        let map = AHashMap::new();
+        assert!(resolve(&c, &map).is_none());
+    }
+
+    #[test]
+    fn matching_deal_returns_some() {
+        let c = stub_campaign(vec!["d1".into()]);
+        let d = Arc::new(stub_deal("d1"));
+        let mut map = AHashMap::new();
+        map.insert("co1".to_owned(), vec![d.clone()]);
+        let result = resolve(&c, &map);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().id, "d1");
+    }
+
+    #[test]
+    fn no_matching_deal_returns_none() {
+        let c = stub_campaign(vec!["d_other".into()]);
+        let d = Arc::new(stub_deal("d1"));
+        let mut map = AHashMap::new();
+        map.insert("co1".to_owned(), vec![d]);
+        assert!(resolve(&c, &map).is_none());
+    }
+
+    #[test]
+    fn company_not_in_map_returns_none() {
+        let c = stub_campaign(vec!["d1".into()]);
+        let map = AHashMap::new();
+        assert!(resolve(&c, &map).is_none());
+    }
+}

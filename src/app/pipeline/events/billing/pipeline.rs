@@ -77,6 +77,13 @@ pub fn build_event_pipeline(
             .clone()
             .ok_or_else(|| anyhow!("Campaign store set but no pub counter store!"))?;
 
+        let deal_store = context
+            .counters_deal_store
+            .get()
+            .ok_or_else(|| anyhow!("Campaign store set but no deal counter store option!"))?
+            .clone()
+            .ok_or_else(|| anyhow!("Campaign store set but deal counter store is None!"))?;
+
         let buyer_manager = context
             .buyer_manager
             .get()
@@ -99,6 +106,7 @@ pub fn build_event_pipeline(
 
         builder.add_blocking(Box::new(RecordCampaignBillingCountersTask::new(
             campaign_store.clone(),
+            deal_store,
             pub_store,
             buyer_manager.clone(),
             advertiser_manager.clone(),

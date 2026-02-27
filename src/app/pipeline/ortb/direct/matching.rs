@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use super::deals;
-use super::pacing::{DealPacer, SpendPacer};
+use super::pacing::DealPacer;
 use super::settlement;
 
 /// Safety cap on direct bid price. Any bid above this is
@@ -18,42 +18,39 @@ use super::settlement;
 /// campaigns or deal pricing
 const MAX_BID_PRICE: f64 = 100.0;
 
-/// A campaign that passed targeting, deal resolution, pricing,
-/// and pacing — ready for winner selection
+/// A campaign that passed targeting, deal resolution, and pricing.
+/// Not yet spend-paced or creative-matched — the caller walks
+/// the sorted candidates to find the first that passes both.
 pub struct CampaignCandidate {
     pub campaign: Arc<Campaign>,
     pub deal: Option<Arc<Deal>>,
     pub price: f64,
 }
 
+/// Unpaced candidates sorted by price descending.
+/// Caller walks them: creative match → spend pacer → first to pass = winner.
 pub struct MatchResult {
     pub candidates: Vec<CampaignCandidate>,
 }
 
-impl MatchResult {
-    pub fn highest_price(self) -> Option<CampaignCandidate> {
-        self.candidates.into_iter().max_by(|a, b| {
-            a.price
-                .partial_cmp(&b.price)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-    }
-}
-
 /// Matches direct deals and campaigns against a single imp.
 ///
+/// Returns unpaced candidates sorted by price descending.
+/// The caller is responsible for walking them in order and
+/// applying creative selection + spend pacing (side effects).
+///
 /// Order of operations:
-/// 1. Evaluate direct deals (small set) against imp targeting
+/// 1. Evaluate direct deals (small set) against imp targeting + deal pacing
 /// 2. Build company_id → matched deals index
 /// 3. Single pass over campaigns — targeting, deal resolution,
-///    price computation, and pacing checked per candidate.
+///    price computation checked per candidate. No side effects.
 ///    DealsOnly skips the full scan and only checks deal-company campaigns.
+/// 4. Sort candidates by price descending
 pub fn match_imp(
     direct_deals: &[Arc<Deal>],
     all_campaigns: &[Arc<Campaign>],
     campaigns_by_company: &dyn Fn(&str) -> Vec<Arc<Campaign>>,
     fill_policy: &FillPolicy,
-    pacer: &dyn SpendPacer,
     deal_pacer: &dyn DealPacer,
     ctx: &AuctionContext,
     imp: &Imp,
@@ -61,12 +58,20 @@ pub fn match_imp(
     let now = Utc::now();
     let deal_map = build_deal_map(direct_deals, deal_pacer, ctx, imp);
 
-    let candidates = match fill_policy {
-        FillPolicy::DealsOnly => {
-            match_deal_only(&deal_map, campaigns_by_company, pacer, &now, ctx, imp)
-        }
-        _ => match_all(all_campaigns, &deal_map, pacer, &now, ctx, imp),
+    let mut candidates = match fill_policy {
+        FillPolicy::DealsOnly => match_deal_only(&deal_map, campaigns_by_company, &now, ctx, imp),
+        _ => match_all(all_campaigns, &deal_map, &now, ctx, imp),
     };
+
+    // Shuffle first, then stable-sort by price descending.
+    // Stable sort preserves the random order among equal-price
+    // candidates, so campaigns at the same price rotate across requests.
+    fastrand::shuffle(&mut candidates);
+    candidates.sort_by(|a, b| {
+        b.price
+            .partial_cmp(&a.price)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     MatchResult { candidates }
 }
@@ -111,7 +116,6 @@ fn build_deal_map(
 fn match_deal_only(
     deal_map: &AHashMap<String, Vec<Arc<Deal>>>,
     campaigns_by_company: &dyn Fn(&str) -> Vec<Arc<Campaign>>,
-    pacer: &dyn SpendPacer,
     now: &chrono::DateTime<Utc>,
     ctx: &AuctionContext,
     imp: &Imp,
@@ -124,7 +128,7 @@ fn match_deal_only(
                 continue;
             }
 
-            if let Some(candidate) = evaluate_campaign(campaign, deal_map, pacer, now, ctx, imp) {
+            if let Some(candidate) = evaluate_campaign(campaign, deal_map, now, ctx, imp) {
                 candidates.push(candidate);
             }
         }
@@ -140,7 +144,6 @@ fn match_deal_only(
 fn match_all(
     all_campaigns: &[Arc<Campaign>],
     deal_map: &AHashMap<String, Vec<Arc<Deal>>>,
-    pacer: &dyn SpendPacer,
     now: &chrono::DateTime<Utc>,
     ctx: &AuctionContext,
     imp: &Imp,
@@ -158,9 +161,7 @@ fn match_all(
             }
         }
 
-        if let Some(candidate) =
-            evaluate_campaign(Arc::clone(campaign), deal_map, pacer, now, ctx, imp)
-        {
+        if let Some(candidate) = evaluate_campaign(Arc::clone(campaign), deal_map, now, ctx, imp) {
             candidates.push(candidate);
         }
     }
@@ -168,12 +169,11 @@ fn match_all(
     candidates
 }
 
-/// Full evaluation of a single campaign: targeting → deal resolution
-/// → price → pacing. Returns None if any check fails.
+/// Campaign evaluation: targeting → deal resolution → price → safety cap.
+/// No side effects — does NOT call spend pacer.
 fn evaluate_campaign(
     campaign: Arc<Campaign>,
     deal_map: &AHashMap<String, Vec<Arc<Deal>>>,
-    pacer: &dyn SpendPacer,
     now: &chrono::DateTime<Utc>,
     ctx: &AuctionContext,
     imp: &Imp,
@@ -190,10 +190,6 @@ fn evaluate_campaign(
             "direct campaign {} bid {:.2} exceeds safety cap {}",
             campaign.id, price, MAX_BID_PRICE
         );
-        return None;
-    }
-
-    if !pacer.passes(&campaign, price) {
         return None;
     }
 
@@ -223,4 +219,334 @@ fn is_campaign_eligible(
     *now >= campaign.start_date
         && *now <= campaign.end_date
         && matches_targeting(&campaign.targeting.common, ctx, imp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::models::campaign::{
+        Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
+    };
+    use crate::core::models::common::Status;
+    use crate::core::models::deal::{Deal, DealOwner, DealPricing, DealTargeting, DemandPolicy};
+    use crate::core::models::targeting::CommonTargeting;
+    use parking_lot::RwLock;
+    use rtb::BidRequestBuilder;
+    use rtb::bid_request::ImpBuilder;
+
+    /// Stub DealPacer: always passes
+    struct AllPassDealPacer;
+    impl DealPacer for AllPassDealPacer {
+        fn passes(&self, _deal: &Deal) -> bool {
+            true
+        }
+        fn record_impression(&self, _deal_id: &str) {}
+    }
+
+    /// Stub DealPacer: always rejects
+    struct RejectDealPacer;
+    impl DealPacer for RejectDealPacer {
+        fn passes(&self, _deal: &Deal) -> bool {
+            false
+        }
+        fn record_impression(&self, _deal_id: &str) {}
+    }
+
+    fn stub_campaign_open(id: &str, price: f64) -> Campaign {
+        Campaign {
+            status: Status::Active,
+            company_id: "co1".into(),
+            id: id.into(),
+            start_date: Utc::now() - chrono::Duration::hours(1),
+            end_date: Utc::now() + chrono::Duration::hours(1),
+            name: format!("campaign_{id}"),
+            pacing: CampaignPacing::Fast,
+            budget: 1000.0,
+            strategy: PricingStrategy::FixedPrice(price),
+            advertiser_id: format!("adv_{id}"),
+            targeting: CampaignTargeting::default(),
+        }
+    }
+
+    fn stub_campaign_deal(id: &str, price: f64, deal_ids: Vec<String>) -> Campaign {
+        Campaign {
+            targeting: CampaignTargeting {
+                common: CommonTargeting::default(),
+                deal_ids,
+            },
+            ..stub_campaign_open(id, price)
+        }
+    }
+
+    fn stub_deal(id: &str, pricing: DealPricing) -> Deal {
+        Deal {
+            status: Status::Active,
+            id: id.into(),
+            name: format!("deal_{id}"),
+            policy: DemandPolicy::Direct {
+                company_ids: vec!["co1".into()],
+            },
+            owner: DealOwner::Platform,
+            pricing,
+            targeting: DealTargeting {
+                common: CommonTargeting::default(),
+            },
+            start_date: None,
+            end_date: None,
+            delivery_goal: None,
+            pacing: None,
+            takes_priority: false,
+        }
+    }
+
+    fn default_ctx() -> AuctionContext {
+        let req = BidRequestBuilder::default()
+            .id("test".to_string())
+            .imp(vec![
+                ImpBuilder::default()
+                    .id("imp1".to_string())
+                    .build()
+                    .unwrap(),
+            ])
+            .build()
+            .unwrap();
+        AuctionContext {
+            pubid: "pub1".into(),
+            req: RwLock::new(req),
+            ..Default::default()
+        }
+    }
+
+    fn default_imp() -> Imp {
+        ImpBuilder::default()
+            .id("imp1".to_string())
+            .build()
+            .unwrap()
+    }
+
+    fn noop_by_company(_company_id: &str) -> Vec<Arc<Campaign>> {
+        vec![]
+    }
+
+    #[test]
+    fn no_campaigns_returns_empty() {
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[],
+            &[],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert!(result.candidates.is_empty());
+    }
+
+    #[test]
+    fn open_campaign_becomes_candidate_with_campaign_price() {
+        let c = Arc::new(stub_campaign_open("c1", 5.0));
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[],
+            &[c],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert_eq!(result.candidates.len(), 1);
+        assert!((result.candidates[0].price - 5.0).abs() < 0.01);
+        assert!(result.candidates[0].deal.is_none());
+    }
+
+    #[test]
+    fn deal_backed_campaign_with_matching_deal() {
+        let deal = Arc::new(stub_deal("d1", DealPricing::Fixed(8.0)));
+        let c = Arc::new(stub_campaign_deal("c1", 5.0, vec!["d1".into()]));
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[deal],
+            &[c],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert_eq!(result.candidates.len(), 1);
+        assert!((result.candidates[0].price - 8.0).abs() < 0.01);
+        assert!(result.candidates[0].deal.is_some());
+    }
+
+    #[test]
+    fn deal_backed_campaign_no_matching_deal_excluded() {
+        // Campaign targets deal "d_other" but only "d1" exists
+        let deal = Arc::new(stub_deal("d1", DealPricing::Fixed(8.0)));
+        let c = Arc::new(stub_campaign_deal("c1", 5.0, vec!["d_other".into()]));
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[deal],
+            &[c],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert!(result.candidates.is_empty());
+    }
+
+    #[test]
+    fn deals_only_skips_open_campaigns() {
+        let deal = Arc::new(stub_deal("d1", DealPricing::Inherit));
+        let open = Arc::new(stub_campaign_open("c_open", 10.0));
+        let deal_backed = Arc::new(stub_campaign_deal("c_deal", 5.0, vec!["d1".into()]));
+
+        let all_campaigns = vec![open, deal_backed.clone()];
+        let by_company = |_company_id: &str| -> Vec<Arc<Campaign>> { vec![deal_backed.clone()] };
+        let ctx = default_ctx();
+        let imp = default_imp();
+
+        let result = match_imp(
+            &[deal],
+            &all_campaigns,
+            &by_company,
+            &FillPolicy::DealsOnly,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        // Only the deal-backed campaign should appear
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].campaign.id, "c_deal");
+    }
+
+    #[test]
+    fn direct_only_includes_open_and_deal_backed() {
+        let deal = Arc::new(stub_deal("d1", DealPricing::Inherit));
+        let open = Arc::new(stub_campaign_open("c_open", 5.0));
+        let deal_backed = Arc::new(stub_campaign_deal("c_deal", 5.0, vec!["d1".into()]));
+
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[deal],
+            &[open, deal_backed],
+            &noop_by_company,
+            &FillPolicy::DirectOnly,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert_eq!(result.candidates.len(), 2);
+    }
+
+    #[test]
+    fn direct_and_rtb_deals_includes_open_and_deal_backed() {
+        let deal = Arc::new(stub_deal("d1", DealPricing::Inherit));
+        let open = Arc::new(stub_campaign_open("c_open", 5.0));
+        let deal_backed = Arc::new(stub_campaign_deal("c_deal", 5.0, vec!["d1".into()]));
+
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[deal],
+            &[open, deal_backed],
+            &noop_by_company,
+            &FillPolicy::DirectAndRtbDeals,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert_eq!(result.candidates.len(), 2);
+    }
+
+    #[test]
+    fn deal_pacer_rejects_excludes_deal() {
+        let deal = Arc::new(stub_deal("d1", DealPricing::Fixed(8.0)));
+        let c = Arc::new(stub_campaign_deal("c1", 5.0, vec!["d1".into()]));
+        let ctx = default_ctx();
+        let imp = default_imp();
+
+        let result = match_imp(
+            &[deal],
+            &[c],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &RejectDealPacer,
+            &ctx,
+            &imp,
+        );
+        // Deal rejected by pacer, campaign has deal_ids so excluded
+        assert!(result.candidates.is_empty());
+    }
+
+    #[test]
+    fn outside_flight_excluded() {
+        let mut c = stub_campaign_open("c1", 5.0);
+        // Set flight to the past
+        c.start_date = Utc::now() - chrono::Duration::hours(10);
+        c.end_date = Utc::now() - chrono::Duration::hours(5);
+        let c = Arc::new(c);
+
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[],
+            &[c],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert!(result.candidates.is_empty());
+    }
+
+    #[test]
+    fn sorted_by_price_desc() {
+        let c_low = Arc::new(stub_campaign_open("c_low", 2.0));
+        let c_high = Arc::new(stub_campaign_open("c_high", 9.0));
+        let c_mid = Arc::new(stub_campaign_open("c_mid", 5.0));
+
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[],
+            &[c_low, c_high, c_mid],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert_eq!(result.candidates.len(), 3);
+        assert!((result.candidates[0].price - 9.0).abs() < 0.01);
+        assert!((result.candidates[1].price - 5.0).abs() < 0.01);
+        assert!((result.candidates[2].price - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn safety_cap_excludes_high_price() {
+        // MAX_BID_PRICE is 100.0
+        let c = Arc::new(stub_campaign_open("c1", 150.0));
+        let ctx = default_ctx();
+        let imp = default_imp();
+        let result = match_imp(
+            &[],
+            &[c],
+            &noop_by_company,
+            &FillPolicy::HighestPrice,
+            &AllPassDealPacer,
+            &ctx,
+            &imp,
+        );
+        assert!(result.candidates.is_empty());
+    }
 }

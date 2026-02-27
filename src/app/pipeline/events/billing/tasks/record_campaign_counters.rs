@@ -1,6 +1,7 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::direct::pacing::{DealPacer, SpendTracker};
 use crate::core::firestore::counters::campaign::{CampaignCounterStore, CampaignCounters};
+use crate::core::firestore::counters::deal::{DealCounterStore, DealCounters};
 use crate::core::firestore::counters::publisher::PublisherCounterStore;
 use crate::core::managers::{AdvertiserManager, BuyerManager};
 use anyhow::{Error, anyhow};
@@ -11,6 +12,7 @@ use tracing::warn;
 
 pub struct RecordCampaignBillingCountersTask {
     campaign_store: Arc<CampaignCounterStore>,
+    deal_store: Arc<DealCounterStore>,
     pub_store: Arc<PublisherCounterStore>,
     buyer_manager: Arc<BuyerManager>,
     advertiser_manager: Arc<AdvertiserManager>,
@@ -21,6 +23,7 @@ pub struct RecordCampaignBillingCountersTask {
 impl RecordCampaignBillingCountersTask {
     pub fn new(
         campaign_store: Arc<CampaignCounterStore>,
+        deal_store: Arc<DealCounterStore>,
         pub_store: Arc<PublisherCounterStore>,
         buyer_manager: Arc<BuyerManager>,
         advertiser_manager: Arc<AdvertiserManager>,
@@ -29,6 +32,7 @@ impl RecordCampaignBillingCountersTask {
     ) -> Self {
         Self {
             campaign_store,
+            deal_store,
             pub_store,
             buyer_manager,
             advertiser_manager,
@@ -62,13 +66,13 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
         // Deal impression tracking — applies to both direct and RTB bids
         if let Some(deal) = &notice.deal {
             self.deal_pacer.record_impression(&deal.id);
+
+            let mut deal_counters = DealCounters::default();
+            deal_counters.impression();
+            self.deal_store.merge(&deal.id, &deal_counters);
         }
 
-        let deal_id = notice
-            .deal
-            .as_ref()
-            .map(|d| d.id.as_str())
-            .unwrap_or("");
+        let deal_id = notice.deal.as_ref().map(|d| d.id.as_str()).unwrap_or("");
 
         if let Some(direct) = &notice.direct {
             let campaign = &direct.campaign;

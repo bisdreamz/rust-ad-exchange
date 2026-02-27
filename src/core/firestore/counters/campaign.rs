@@ -150,10 +150,8 @@ impl CampaignCounterStore {
     ) {
         self.by_buyer.merge(&[buyer_id, buyer_name], buffer);
 
-        self.by_campaign.merge(
-            &[buyer_id, buyer_name, campaign_id, campaign_name],
-            buffer,
-        );
+        self.by_campaign
+            .merge(&[buyer_id, buyer_name, campaign_id, campaign_name], buffer);
 
         self.by_detail.merge(
             &[

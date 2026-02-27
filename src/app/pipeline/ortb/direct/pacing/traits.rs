@@ -20,17 +20,12 @@ pub trait SpendPacer: Send + Sync {
 /// external stores may lag by the sync interval.
 pub trait SpendTracker: Send + Sync {
     /// Total spend in dollars for this campaign across the entire flight.
-    /// Returns None if the campaign is not registered — callers must
-    /// treat None as deny (fail closed).
-    fn total_spend(&self, campaign_id: &str) -> Option<f64>;
+    /// Returns 0.0 for campaigns with no recorded spend yet.
+    fn total_spend(&self, campaign_id: &str) -> f64;
 
     /// Record incremental spend from a billed impression.
     /// Called from the billing events pipeline.
     fn record_spend(&self, campaign_id: &str, amount: f64);
-
-    /// Register a campaign for tracking with initial spend.
-    /// Must be called at startup for every active campaign.
-    fn register(&self, campaign_id: &str, initial_spend: f64);
 }
 
 /// Deal delivery pacing check.
@@ -51,14 +46,9 @@ pub trait DealPacer: Send + Sync {
 /// Analogous to SpendTracker but counts impressions, not dollars.
 pub trait DealImpressionTracker: Send + Sync {
     /// Total impressions delivered for this deal across its flight.
-    /// Returns None if the deal is not registered — callers must
-    /// treat None as deny (fail closed).
-    fn total_impressions(&self, deal_id: &str) -> Option<u64>;
+    /// Returns 0 for deals with no recorded impressions yet.
+    fn total_impressions(&self, deal_id: &str) -> u64;
 
     /// Record an impression from a billing event.
     fn record_impression(&self, deal_id: &str);
-
-    /// Register a deal for tracking with initial impression count.
-    /// Must be called at startup for every active deal.
-    fn register(&self, deal_id: &str, initial_impressions: u64);
 }
