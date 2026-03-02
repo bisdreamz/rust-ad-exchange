@@ -3,8 +3,12 @@ use logictree::{Feature, PredictionHandler};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::ops::{Div, Mul};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use arc_swap::ArcSwap;
+use smallvec::SmallVec;
+use crate::core::models::shaping::Metric;
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct HandlerState {
@@ -32,15 +36,6 @@ impl HandlerState {
         self.rev_gross += input.rev_gross as f64;
         self.rev_cost += input.rev_cost as f64;
     }
-
-    fn merge(&mut self, state: &HandlerState) {
-        self.auctions += state.auctions;
-        self.bids += state.bids;
-        self.bids_value += state.bids_value;
-        self.impressions += state.impressions;
-        self.rev_gross += state.rev_gross;
-        self.rev_cost += state.rev_cost;
-    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
@@ -53,9 +48,21 @@ impl RtbPredictionOutput {
         RtbPredictionOutput { state }
     }
 
+    /// Convenience method for returning the
+    /// calculated metric from this prediction node
+    /// for the provided target metric KPI
+    pub fn metric_value(&self, metric: &Metric) -> f32 {
+         match metric {
+            Metric::BidRate => self.bid_rate_percent(),
+            Metric::Bvpm => self.bid_value_per_mille(),
+            Metric::FillRate => self.fill_rate_percent(),
+            Metric::Rpm => self.rev_per_million_auctions(),
+        }
+    }
+
     /// The effective revenue in whole dollars generated
     /// per million auctions sent to the bidder, e.g. ($)8.25
-    pub fn rev_per_mille(&self) -> f32 {
+    pub fn rev_per_million_auctions(&self) -> f32 {
         if self.state.auctions == 0 || self.state.impressions == 0 {
             return 0.0;
         }
@@ -67,7 +74,7 @@ impl RtbPredictionOutput {
     }
 
     pub fn bid_value_per_mille(&self) -> f32 {
-        if self.state.auctions == 0 || self.state.impressions == 0 {
+        if self.state.bids == 0 || self.state.auctions == 0 {
             return 0.0;
         }
 
@@ -119,15 +126,45 @@ pub struct RtbPredictionHandler {
     last_active: AtomicU64,
     #[serde(with = "serializers::rwlock_serde")]
     state: RwLock<HandlerState>,
+    // this can be updated dynamically
+    // which we need to sort picking
+    // prediction branch for multi value features
+    // THIS WONT SUPPORT saving and loading
+    // from a file! The current usage doesnt do
+    // this anyway but note this limitation!
+    #[serde(skip, default = "deserialized_metric_unsupported")]
+    metric: Arc<ArcSwap<Metric>>
+}
+
+fn deserialized_metric_unsupported() -> Arc<ArcSwap<Metric>> {
+    panic!("Deserialized RtbPredictionHandler does not support metric swap and thus loading a saved model unsupported now");
 }
 
 impl RtbPredictionHandler {
-    pub fn new(min_decision_auctions: u32, segment_ttl_secs: u32) -> RtbPredictionHandler {
+    /// Create a prediction handler which stores metrics observed
+    /// for a particular ad segment, and calculates its performance,
+    /// such that any target KPI can be produced for shaping.
+    /// # Arguments
+    /// * `min_decision_auctions` - Min number of auctions seen
+    /// before a tree node decides its confident enough to make
+    /// a prediction, usually 500-1000 is good.
+    /// * `segment_ttl_secs` - Seconds before we evict a segment
+    /// from memory for inactivity to prevent memory leaks. Suggest
+    /// 10-30 mins or so.
+    /// * `metric` - The metric we are optimizing toward, which
+    /// can be updated/swapped by the owner of this pred handler.
+    /// This determines sort order and priority when choosing a branch
+    /// for prediction when multiple values are present, e.g.
+    /// if a req has banner, video present - itll likely use
+    /// the video metrics to value this request if it has
+    /// higher average value
+    pub fn new(min_decision_auctions: u32, segment_ttl_secs: u32, metric: Arc<ArcSwap<Metric>>) -> RtbPredictionHandler {
         Self {
             min_auctions: min_decision_auctions,
             segment_ttl_secs,
             last_active: AtomicU64::new(rtb::common::utils::epoch_timestamp()),
             state: RwLock::new(HandlerState::default()),
+            metric,
         }
     }
 }
@@ -152,27 +189,40 @@ impl PredictionHandler<RtbTrainingInput, RtbPredictionOutput> for RtbPredictionH
         active_delta_secs >= self.segment_ttl_secs as u64
     }
 
-    fn new_instance(&self) -> Self
+    fn new_instance(&self,) -> Self
     where
         Self: Sized,
     {
-        RtbPredictionHandler::new(self.min_auctions, self.segment_ttl_secs)
+        RtbPredictionHandler::new(self.min_auctions, self.segment_ttl_secs, self.metric.clone())
     }
 
     fn resolve(
         &self,
-        predictions: Vec<(RtbPredictionOutput, usize)>,
-    ) -> Option<RtbPredictionOutput> {
-        let mut aggregate_state = HandlerState::default();
+        predictions: SmallVec<[(RtbPredictionOutput, usize); 1]>,
+    ) -> Option<(RtbPredictionOutput, usize)> {
+        let metric = self.metric.load();
+        let mut best_branch = None;
+        let mut highest_metric = 0.0;
 
-        for (prediction, _) in predictions {
-            aggregate_state.merge(&prediction.state);
+        for (prediction, pred_depth) in predictions {
+            if prediction.state.auctions < self.min_auctions as u64 {
+                continue;
+            }
+
+            if best_branch.is_none() {
+                highest_metric = prediction.metric_value(&metric);
+                best_branch = Some((prediction, pred_depth));
+
+                continue;
+            }
+
+            let pred_metric_val = prediction.metric_value(&metric);
+            if pred_metric_val > highest_metric {
+                highest_metric = pred_metric_val;
+                best_branch = Some((prediction, pred_depth));
+            }
         }
 
-        if aggregate_state.auctions < self.min_auctions as u64 {
-            return None;
-        }
-
-        Some(RtbPredictionOutput::new(aggregate_state))
+        best_branch
     }
 }

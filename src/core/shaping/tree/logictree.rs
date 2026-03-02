@@ -1,14 +1,15 @@
+use crate::core::cluster::ClusterDiscovery;
 use crate::core::models::shaping::{Metric, ShapingFeature};
 use crate::core::shaping::threshold::QpsHistogram;
 use crate::core::shaping::tree::handler::{
     RtbPredictionHandler, RtbPredictionOutput, RtbTrainingInput,
 };
 use crate::core::shaping::{tree, utils};
-use anyhow::{Error, anyhow, bail, format_err};
+use anyhow::{anyhow, bail, format_err, Error};
 use arc_swap::ArcSwap;
 use logictree::{Feature, LogicTree};
-use rtb::BidRequest;
 use rtb::bid_response::Bid;
+use rtb::BidRequest;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
@@ -37,7 +38,7 @@ fn task_cycle_threshold(
             // target criteria (qps or min threshold)
             ThresholdState {
                 threshold: 0.0,
-                qps_passing: tick.effective_qps(),
+                qps_passing: 0,
                 qps_avail: tick.effective_qps(),
             }
         }
@@ -74,8 +75,14 @@ fn decode_feature_string(feature_string: &String) -> Result<Vec<Feature>, Error>
 
 #[derive(Debug, Default)]
 struct ThresholdState {
+    /// Current calculated threshold which produces the
+    /// associated passing qps
     pub threshold: f32,
+    /// Total measured QPS available last second
+    /// to this endpoint shaper on this particular node
     pub qps_avail: u32,
+    /// Total QPS passing the target metric as measured
+    /// by this endpoint shaper on this node
     pub qps_passing: u32,
 }
 
@@ -103,6 +110,15 @@ struct DynamicConfig {
     min_threshold: f32,
 }
 
+/// Derive the node-local QPS share from the cluster-wide endpoint limit.
+/// Returns 0 when no limit is configured (unlimited).
+fn local_qps_limit(limit: u32, cluster_size: usize) -> u32 {
+    match limit {
+        0 => 0,
+        limit => (limit / cluster_size.max(1) as u32).max(1),
+    }
+}
+
 /// A Summarizing, online learning traffic shaping implementation
 /// built atop the ['LogicTree']
 ///
@@ -121,6 +137,11 @@ pub struct TreeShaper {
     state: Arc<ArcSwap<ThresholdState>>,
     /// Dynamically updatable config (metric, explore_percent, qps_limit, min_threshold)
     config: Arc<ArcSwap<DynamicConfig>>,
+    /// So we can swap metric directly to update
+    /// the prediction handler when sorting
+    /// multi value branches for highest value
+    handler_metric: Arc<ArcSwap<Metric>>,
+    cluster: Arc<dyn ClusterDiscovery>,
     task_handles: Vec<JoinHandle<()>>,
 }
 
@@ -133,10 +154,13 @@ impl TreeShaper {
         explore_percent: u32,
         qps_limit: u32,
         min_threshold: f32,
+        cluster: Arc<dyn ClusterDiscovery>,
     ) -> Self {
+        let arc_metric = Arc::new(ArcSwap::from_pointee(metric.clone()));
+
         let str_features = features.iter().map(|f| f.to_string()).collect();
         let first_pred_handler =
-            RtbPredictionHandler::new(min_decision_auctions, segment_ttl.as_secs() as u32);
+            RtbPredictionHandler::new(min_decision_auctions, segment_ttl.as_secs() as u32, arc_metric.clone());
 
         let tree = Arc::new(LogicTree::new(str_features, first_pred_handler));
         let state = Arc::new(ArcSwap::new(Arc::new(ThresholdState::default())));
@@ -155,16 +179,19 @@ impl TreeShaper {
             let histogram = histogram.clone();
             let state = state.clone();
             let config = config.clone();
+            let cluster = cluster.clone();
+
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(1));
                 loop {
                     interval.tick().await;
                     let cfg = config.load();
+                    let local_qps = local_qps_limit(cfg.qps_limit, cluster.cluster_size());
                     let avail_qps = state.load().qps_avail;
+                    let effective_avail_qps = tree::utils::calc_effective_avail_pool(local_qps, avail_qps);
                     let passing_qps_budget = tree::utils::qps_budget_passing(
                         cfg.explore_percent,
-                        cfg.qps_limit,
-                        avail_qps,
+                        effective_avail_qps,
                     );
 
                     if passing_qps_budget == 0 && avail_qps > 0 {
@@ -196,6 +223,8 @@ impl TreeShaper {
             features: features.clone(),
             state,
             config,
+            handler_metric: arc_metric,
+            cluster,
             task_handles: vec![h1, h2],
         }
     }
@@ -211,6 +240,13 @@ impl TreeShaper {
         qps_limit: u32,
         min_threshold: f32,
     ) {
+        let old_metric = self.handler_metric.load_full();
+        if old_metric.as_ref() != &metric {
+            info!("Updating metric from {} to {} for endpoint",
+                old_metric, metric);
+            self.handler_metric.store(Arc::new(metric.clone()));
+        }
+
         self.config.store(Arc::new(DynamicConfig {
             metric,
             explore_percent,
@@ -236,12 +272,17 @@ impl TreeShaper {
         };
 
         let state = self.state.load();
+        let cfg = self.config.load();
+        let local_qps_limit = local_qps_limit(cfg.qps_limit, self.cluster.cluster_size());
+
         // We will continuously offset this avail pool by the amounts
         // consumed at certain code paths to ensure later QPS shares
         // are properly adjusted, e.g. we dont calculate a boost
         // passing with the *total* qps, when in fact it only sees
-        // evaluations for (avail - passing - exploratory)
-        let mut avail_qps_pool = state.qps_avail;
+        // evaluations for (avail - passing - exploratory). Pool
+        // starts at the letter of the local QPS limit or the actual
+        // available qps if less than endpoint limit
+        let avail_qps_pool = tree::utils::calc_effective_avail_pool(local_qps_limit, state.qps_avail);
 
         let prediction = match prediction_opt {
             Some(prediction) => prediction,
@@ -264,14 +305,7 @@ impl TreeShaper {
             }
         };
 
-        let cfg = self.config.load();
-
-        let metric_value = match cfg.metric {
-            Metric::BidRate => prediction.value.bid_rate_percent(),
-            Metric::Bvpm => prediction.value.bid_value_per_mille(),
-            Metric::FillRate => prediction.value.fill_rate_percent(),
-            Metric::Rpm => prediction.value.rev_per_mille(),
-        };
+        let metric_value = prediction.value.metric_value(&self.config.load().metric);
 
         // records the *available* request and its value in the histogram so it sees all
         self.histogram
@@ -295,26 +329,24 @@ impl TreeShaper {
             });
         }
 
-        avail_qps_pool = avail_qps_pool.saturating_sub(state.qps_passing);
+        /* avail_qps_pool = avail_qps_pool.saturating_sub(state.qps_passing);
         if avail_qps_pool == 0 && state.threshold > 0.0 {
             // how is this possible? this says that all qps passing = qps avail
             // but it didnt pass the check above?
 
             warn!(
-                "Passing QPS ({}) is >= available ({}) but failed metric?!",
-                state.qps_passing, state.qps_avail
+                "Passing QPS ({}) is >= available ({}) but failed metric?! threshold {} target {} prediction {:?}",
+                state.qps_passing, state.qps_avail, state.threshold, metric_value, prediction
             );
-        }
+        } */
 
         let qps_exploratory = tree::utils::qps_budget_exploratory(
             cfg.explore_percent,
-            cfg.qps_limit,
-            state.qps_avail, // exploratory is percent of endpoint qps limit OR all avail
+            avail_qps_pool // must be entire available pool
         );
+
         if tree::utils::qps_passes_percentage(qps_exploratory, avail_qps_pool) {
             debug!("Request failed shaping but passed exploratory");
-
-            self.record_auction(req)?;
 
             return Ok(ShapingResult {
                 decision: ShapingDecision::PassedExploratory,
@@ -325,8 +357,11 @@ impl TreeShaper {
             });
         }
 
-        avail_qps_pool = avail_qps_pool.saturating_sub(qps_exploratory);
-        if avail_qps_pool == 0 {
+        let qps_pool_after_exploratory_passing = avail_qps_pool
+            .saturating_sub(qps_exploratory)
+            .saturating_sub(state.qps_passing);
+
+        if qps_pool_after_exploratory_passing == 0 {
             debug!(
                 "Request failed shaping. Full QPS allocation used by passing and exploratory, blocking boost"
             );
@@ -357,13 +392,9 @@ impl TreeShaper {
             });
         }
 
-        let qps_boost = tree::utils::qps_budget_boost(
-            state.qps_passing,
-            qps_exploratory,
-            cfg.qps_limit,
-            avail_qps_pool,
-        );
-        if tree::utils::qps_passes_percentage(qps_boost, avail_qps_pool) {
+        // now we have the qps of boost, calculate its passing
+        // against the total effective qps pool
+        if tree::utils::qps_passes_percentage(qps_pool_after_exploratory_passing, avail_qps_pool) {
             debug!("Request passing through boost");
 
             return Ok(ShapingResult {
@@ -375,11 +406,9 @@ impl TreeShaper {
             });
         }
 
-        avail_qps_pool = avail_qps_pool.saturating_sub(qps_boost);
-
         debug!(
-            "Request failed shaping, exploratory, and boost - blocking! Had {} unallocated QPS",
-            avail_qps_pool
+            "Request failed shaping, exploratory, and boost - blocking! Had {} boost QPS",
+            qps_pool_after_exploratory_passing
         );
 
         Ok(ShapingResult {
@@ -449,7 +478,23 @@ impl TreeShaper {
                     rev_cost: cpm_cost as f32,
                 },
             )
-            .map_err(|e| anyhow!("Failed recording tree impression: {}", e))
+            .map_err(|e| anyhow!("Failed recording tree impression: {}", e))?;
+
+        match self.tree.predict(&features)
+            .map_err(|e| anyhow!("Failed debug predict on tree impression: {}", e))? {
+            Some(prediction) => {
+                info!(
+                    "Pred result after imp train:: {:?}\t Prediction: {:?} rev gross {}",
+                    features, prediction, cpm_gross
+                );
+            }
+            None => {
+                warn!("No pred result yet after train, features: {:?} cpm gross {}",
+                    features, cpm_gross);
+            }
+        }
+
+        Ok(())
     }
 }
 
