@@ -108,6 +108,10 @@ pub struct RexConfig {
     /// is host-only (suitable for local development)
     #[serde(default)]
     pub cookie_domain: Option<String>,
+    /// Skip IP/bot datacenter blocking in the enrichment pipeline.
+    /// Useful for local development or when traffic is pre-filtered.
+    #[serde(default)]
+    pub skip_ip_block: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
