@@ -37,16 +37,21 @@ fn build_enrichment_pipeline(
         .get()
         .ok_or(anyhow!("Config not set when building enrichment pipeline"))?;
 
-    let pipeline = PipelineBuilder::new()
+    let mut builder = PipelineBuilder::new()
         .with_blocking(Box::new(tasks::enrichment::PublisherEnabledCheckTask))
         .with_blocking(Box::new(tasks::enrichment::ValidateRequestTask))
         .with_blocking(Box::new(tasks::enrichment::SchainHopsGlobalFilter::new(
             config.schain_limit,
         )))
-        .with_blocking(Box::new(tasks::enrichment::JunkFilterTask))
-        .with_blocking(Box::new(tasks::enrichment::IpBlockTask::new(
+        .with_blocking(Box::new(tasks::enrichment::JunkFilterTask));
+
+    if !config.skip_ip_block {
+        builder = builder.with_blocking(Box::new(tasks::enrichment::IpBlockTask::new(
             ip_risk_filter,
-        )))
+        )));
+    }
+
+    let pipeline = builder
         .with_blocking(Box::new(tasks::enrichment::DeviceLookupTask::new(
             device_lookup,
         )))
@@ -271,9 +276,22 @@ struct AuctionOrchestratorTask {
 impl AuctionOrchestratorTask {
     async fn run0(&self, ctx: &AuctionContext) -> Result<(), Error> {
         // Phase 1: Enrichment — pub lookup, validation, device, identity, etc.
-        // Errors here abort the auction (bad request, blocked IP, etc.)
-        self.enrichment_pipeline.run(ctx).await?;
+        // Errors here mean the request is blocked — skip auction phases.
+        let auction_res = match self.enrichment_pipeline.run(ctx).await {
+            Ok(()) => self.run_auction(ctx).await,
+            err => err,
+        };
 
+        // Finalizers ALWAYS run — counters and events must be persisted
+        // regardless of whether the auction succeeded, failed, or was blocked.
+        if let Some(finalizers) = &self.finalizers_pipeline {
+            finalizers.run(ctx).await?;
+        }
+
+        auction_res
+    }
+
+    async fn run_auction(&self, ctx: &AuctionContext) -> Result<(), Error> {
         // Phase 2: Direct campaign matching → staging
         if let Some(direct_task) = &self.direct_task {
             // Direct matching never errors — misses are silent
@@ -300,12 +318,6 @@ impl AuctionOrchestratorTask {
         // Phase 6: Settlement
         let settlement_res = tasks::settlement::BidSettlementTask.run(ctx).await;
 
-        // Phase 7: Finalizers — ALWAYS run regardless of auction errors.
-        // Counters and events must be persisted for any work done above.
-        if let Some(finalizers) = &self.finalizers_pipeline {
-            finalizers.run(ctx).await?;
-        }
-
         // Surface RTB error if no bids were produced from any source
         if let Some(e) = rtb_err {
             if ctx.bidders.lock().await.is_empty() {
@@ -313,7 +325,6 @@ impl AuctionOrchestratorTask {
             }
         }
 
-        // Return the first error from phases 4-6, if any
         merge_res.and(shared_res).and(settlement_res)
     }
 }
