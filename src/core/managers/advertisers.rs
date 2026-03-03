@@ -4,7 +4,7 @@ use anyhow::Error;
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, info};
 
 struct AdvertiserCache {
     by_id: HashMap<String, Arc<Advertiser>>,
@@ -44,7 +44,9 @@ impl AdvertiserManager {
     }
 
     fn load(&self, advertisers: Vec<Advertiser>) {
+        let total = advertisers.len();
         let cache = AdvertiserCache::build(advertisers.into_iter().map(Arc::new));
+        info!("Loaded {} advertisers", total);
         self.cache.store(Arc::new(cache));
     }
 
@@ -58,8 +60,20 @@ impl AdvertiserManager {
 
     fn handle_event(&self, event: ProviderEvent<Advertiser>) {
         match event {
-            ProviderEvent::Added(a) | ProviderEvent::Modified(a) => {
-                debug!("Advertiser updated: {}", a.id);
+            ProviderEvent::Added(a) => {
+                debug!(
+                    "Advertiser added: {} ({}) buyer={}",
+                    a.brand, a.id, a.buyer_id
+                );
+                self.rebuild(|m| {
+                    m.insert(a.id.clone(), Arc::new(a));
+                });
+            }
+            ProviderEvent::Modified(a) => {
+                debug!(
+                    "Advertiser modified: {} ({}) buyer={}",
+                    a.brand, a.id, a.buyer_id
+                );
                 self.rebuild(|m| {
                     m.insert(a.id.clone(), Arc::new(a));
                 });

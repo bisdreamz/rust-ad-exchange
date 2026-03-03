@@ -7,6 +7,7 @@ use crate::core::demand::notifications::{
 };
 use crate::core::events;
 use crate::core::events::{billing, macros};
+use crate::core::models::creative::CreativeFormat;
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
@@ -150,9 +151,22 @@ impl NotificationsUrlInjectionTask {
         );
 
         let direct = bid_context.direct.get().map(|d| DirectCampaignDetails {
+            buyer: Arc::clone(&d.buyer),
             campaign: Arc::clone(&d.campaign),
             creative: Arc::clone(&d.creative),
         });
+
+        let format = if let Some(d) = bid_context.direct.get() {
+            d.creative.format.clone()
+        } else {
+            let ad_format = rtb::utils::detect_ad_format(&bid_context.bid)
+                .unwrap_or(rtb::utils::adm::AdFormat::Banner);
+            CreativeFormat::from_rtb(
+                ad_format,
+                bid_context.bid.w as u32,
+                bid_context.bid.h as u32,
+            )
+        };
 
         let deal = bid_context.deal.get().cloned();
 
@@ -163,6 +177,7 @@ impl NotificationsUrlInjectionTask {
                     burl: demand_burl_opt,
                     lurl: None,
                 },
+                format,
                 direct,
                 deal,
             },

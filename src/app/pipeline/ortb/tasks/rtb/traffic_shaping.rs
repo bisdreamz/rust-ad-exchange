@@ -64,7 +64,8 @@ impl TrafficShapingTask {
             outcome = tracing::field::Empty,
             metric_value = tracing::field::Empty,
             metric_target = tracing::field::Empty,
-            feature_string = tracing::field::Empty,
+            pred_depth = tracing::field::Empty,
+            features = tracing::field::Empty
         );
 
         callout
@@ -85,6 +86,7 @@ impl TrafficShapingTask {
                     span.record("outcome", res.decision.to_string());
                     span.record("metric_value", res.metric_value);
                     span.record("metric_target", res.metric_target);
+                    span.record("pred_depth", res.pred_depth);
                     span.record("features", format!("{:?}", res.features));
                 }
 

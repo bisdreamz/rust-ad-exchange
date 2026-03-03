@@ -2,7 +2,7 @@ use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderContext, IdentityContext};
 use crate::core::models::publisher::Publisher;
 use crate::core::usersync::SyncStore;
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use async_trait::async_trait;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{KeyValue, global};
@@ -121,10 +121,7 @@ impl IdentityDemandTask {
         };
 
         let mut bidders = context.bidders.lock().await;
-        let publisher = context
-            .publisher
-            .get()
-            .ok_or_else(|| anyhow!("No publisher found in context!"))?;
+        let publisher = &context.publisher;
 
         self.inject_buyer_uids(identity, &mut bidders, publisher)
             .await;

@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 /// on remote RTB partners
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DemandPolicy {
-    /// Direct advertisers by seat id (internal company id)
+    /// Direct advertisers by seat id (internal buyer id)
     /// Only allows bidding by the selected on-platform
     /// direct advertisers, no RTB exposure. Used if
     /// a publishers tag is deal-only for sales exposure.
-    Direct { company_ids: Vec<String> },
+    Direct { buyer_ids: Vec<String> },
     /// Deal sent to RTB specific buyer(s) of
     /// dsp id (company id)-> weat(s) (the wseat
     /// value from the dsp). wseats is optional

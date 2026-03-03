@@ -21,8 +21,6 @@ impl Provider<Deal> for ConfigDealProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<Deal>) + Send + Sync>,
     ) -> Result<Vec<Deal>, Error> {
-        self.config_manager.get().deals.clone().ok_or_else(|| {
-            anyhow::anyhow!("deals must be defined in config when Firestore is not configured")
-        })
+        Ok(self.config_manager.get().deals.clone().unwrap_or_default())
     }
 }

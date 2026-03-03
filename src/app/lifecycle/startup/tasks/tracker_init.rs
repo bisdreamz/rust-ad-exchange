@@ -2,21 +2,18 @@ use crate::app::context::StartupContext;
 use crate::app::pipeline::ortb::direct::pacing::{
     CampaignSpendPacer, DealImpressionTracker, EvenDealPacer, FirestoreDealTracker,
     FirestoreSpendTracker, InMemoryDealTracker, InMemorySpendTracker, system_epoch_clock,
+    system_fine_clock,
 };
-use crate::core::firestore::counters::campaign::SPEND_COLLECTION;
-use crate::core::firestore::counters::deal::DEAL_PACING_COLLECTION;
+use crate::core::firestore::counters::campaign::{SPEND_COLLECTION, SPEND_DAILY_COLLECTION};
+use crate::core::firestore::counters::deal::{
+    DEAL_PACING_COLLECTION, DEAL_PACING_DAILY_COLLECTION,
+};
 use crate::core::providers::FirestoreProvider;
 use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use std::sync::Arc;
 use tracing::{info, instrument};
-
-/// Default pacing window for deal delivery rate limiting (seconds).
-const DEAL_PACING_WINDOW_SECS: u64 = 60;
-
-/// Default pacing window for campaign spend rate limiting (seconds).
-const CAMPAIGN_PACING_WINDOW_SECS: u64 = 3600;
 
 /// Creates spend and deal trackers + the deal pacer based on
 /// whether Firestore is configured. Must run after CounterStoresTask,
@@ -39,12 +36,15 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
             .clone();
 
         let clock = system_epoch_clock();
+        let fine_clock = system_fine_clock();
 
         // --- Spend tracker ---
         match firestore_opt {
             Some(db) => {
                 let provider = Arc::new(FirestoreProvider::new(db.clone(), SPEND_COLLECTION));
-                let tracker = FirestoreSpendTracker::start(provider).await?;
+                let daily_provider =
+                    Arc::new(FirestoreProvider::new(db.clone(), SPEND_DAILY_COLLECTION));
+                let tracker = FirestoreSpendTracker::start(provider, daily_provider).await?;
                 context
                     .spend_tracker
                     .set(tracker)
@@ -67,7 +67,11 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
         let deal_tracker: Arc<dyn DealImpressionTracker> = match firestore_opt {
             Some(db) => {
                 let provider = Arc::new(FirestoreProvider::new(db.clone(), DEAL_PACING_COLLECTION));
-                let tracker = FirestoreDealTracker::start(provider).await?;
+                let daily_provider = Arc::new(FirestoreProvider::new(
+                    db.clone(),
+                    DEAL_PACING_DAILY_COLLECTION,
+                ));
+                let tracker = FirestoreDealTracker::start(provider, daily_provider).await?;
                 info!("Started Firestore deal impression tracker");
                 tracker
             }
@@ -87,9 +91,18 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
         let deal_pacer = Arc::new(EvenDealPacer::new(
             deal_tracker,
             Box::new(move || cluster_for_pacer.cluster_size()),
-            DEAL_PACING_WINDOW_SECS,
             clock.clone(),
+            fine_clock.clone(),
         ));
+
+        // Wire deal manager → deal pacer eviction callback
+        if let Some(deal_mgr) = context.deal_manager.get() {
+            let dp = deal_pacer.clone();
+            deal_mgr.on_expired(Box::new(move |id| {
+                dp.evict(id);
+            }));
+        }
+
         context
             .deal_pacer
             .set(deal_pacer)
@@ -107,9 +120,18 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
         let spend_pacer = Arc::new(CampaignSpendPacer::new(
             spend_tracker_for_pacer,
             cluster.clone(),
-            CAMPAIGN_PACING_WINDOW_SECS,
             clock,
+            fine_clock,
         ));
+
+        // Wire campaign manager → spend pacer eviction callback
+        if let Some(campaign_mgr) = context.campaign_manager.get() {
+            let sp = spend_pacer.clone();
+            campaign_mgr.on_expired(Box::new(move |id| {
+                sp.evict(id);
+            }));
+        }
+
         context
             .spend_pacer
             .set(spend_pacer)

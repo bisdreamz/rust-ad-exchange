@@ -48,7 +48,7 @@ impl BlockingTask<AuctionContext, Error> for SchainAppendTask {
         let node = SupplyChainNodeBuilder::default()
             .hp(true)
             .rid(req.id.clone())
-            .sid(context.pubid.clone())
+            .sid(context.publisher.id.clone())
             .asi(config.asi.clone())
             .name(config.name.clone())
             .build()

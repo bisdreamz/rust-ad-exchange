@@ -1,64 +1,45 @@
-use super::reservation::{DEFAULT_BUCKET_SECS, EpochClock, ReservationRing};
+use super::bucket::{AdaptiveBucket, TrackerStaleness};
+use super::reservation::{DEFAULT_BUCKET_SECS, EpochClock, FineClock, ReservationRing};
 use super::traits::{DealImpressionTracker, DealPacer};
 use crate::core::models::deal::{Deal, DealPacing, DeliveryGoal};
 use dashmap::DashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use tracing::warn;
 
-/// Window target is clamped to at most this many times the flat
-/// even rate, preventing burst flooding when catching up.
+/// Rate is clamped to at most this many times the flat even rate,
+/// preventing burst flooding when catching up.
 const DEFAULT_SAFETY_MULTIPLIER: f64 = 3.0;
 
 const SECS_PER_DAY: f64 = 86400.0;
-
-struct WindowState {
-    imps_this_window: AtomicU64,
-    window_start: AtomicU64,
-}
-
-impl WindowState {
-    fn new(now_epoch: u64) -> Self {
-        Self {
-            imps_this_window: AtomicU64::new(0),
-            window_start: AtomicU64::new(now_epoch),
-        }
-    }
-
-    fn maybe_reset(&self, now_epoch: u64, window_secs: u64) {
-        let start = self.window_start.load(Relaxed);
-        if now_epoch - start >= window_secs {
-            self.imps_this_window.store(0, Relaxed);
-            self.window_start.store(now_epoch, Relaxed);
-        }
-    }
-}
 
 pub struct EvenDealPacer {
     tracker: Arc<dyn DealImpressionTracker>,
     /// Reuses ReservationRing — reserve(1.0) per imp, total() = imp count
     rings: DashMap<String, ReservationRing>,
-    windows: DashMap<String, WindowState>,
+    buckets: DashMap<String, AdaptiveBucket>,
+    staleness: DashMap<String, TrackerStaleness>,
     cluster_size: Box<dyn Fn() -> usize + Send + Sync>,
-    window_secs: u64,
     safety_multiplier: f64,
     clock: EpochClock,
+    fine_clock: FineClock,
 }
 
 impl EvenDealPacer {
     pub fn new(
         tracker: Arc<dyn DealImpressionTracker>,
         cluster_size: Box<dyn Fn() -> usize + Send + Sync>,
-        window_secs: u64,
         clock: EpochClock,
+        fine_clock: FineClock,
     ) -> Self {
         Self {
             tracker,
             rings: DashMap::new(),
-            windows: DashMap::new(),
+            buckets: DashMap::new(),
+            staleness: DashMap::new(),
             cluster_size,
-            window_secs,
             safety_multiplier: DEFAULT_SAFETY_MULTIPLIER,
             clock,
+            fine_clock,
         }
     }
 
@@ -73,67 +54,37 @@ impl EvenDealPacer {
     }
 
     fn reserve(&self, deal_id: &str) {
-        self.rings
-            .entry(deal_id.to_owned())
-            .or_insert_with(|| ReservationRing::new(DEFAULT_BUCKET_SECS, self.clock.clone()))
-            .reserve(1.0);
-    }
-
-    fn nodes(&self) -> f64 {
-        (self.cluster_size)().max(1) as f64
-    }
-
-    fn windows_per_day(&self) -> f64 {
-        (SECS_PER_DAY / self.window_secs as f64).max(1.0)
-    }
-
-    /// Apply windowed rate limiting with the given target per window.
-    fn window_check(&self, deal: &Deal, target: f64) -> bool {
-        let now_epoch = (self.clock)();
-        let ws = self
-            .windows
-            .entry(deal.id.clone())
-            .or_insert_with(|| WindowState::new(now_epoch));
-        ws.maybe_reset(now_epoch, self.window_secs);
-
-        let window_delivered = ws.imps_this_window.load(Relaxed);
-        if window_delivered as f64 >= target {
-            return false;
+        if let Some(ring) = self.rings.get_mut(deal_id) {
+            ring.reserve(1.0);
+        } else {
+            let ring = ReservationRing::new(DEFAULT_BUCKET_SECS, self.clock.clone());
+            ring.reserve(1.0);
+            self.rings.insert(deal_id.to_owned(), ring);
         }
-
-        ws.imps_this_window.fetch_add(1, Relaxed);
-        self.reserve(&deal.id);
-        true
     }
 
     /// Even pacing for Total goal with end_date:
-    /// adaptive target from remaining imps / remaining time,
+    /// adaptive rate from remaining imps / remaining time,
     /// capped by safety multiplier × flat rate.
     fn even_total_flight(&self, deal: &Deal, limit: u64, delivered: u64, end_epoch: u64) -> bool {
-        let now_epoch = (self.clock)();
-        let remaining_imps = limit - delivered;
-        let nodes = self.nodes();
+        let now_secs = (self.fine_clock)();
+        let remaining_imps = (limit - delivered) as f64;
+        let remaining_secs = (end_epoch as f64 - now_secs).max(1.0);
+        let nodes = (self.cluster_size)().max(1) as f64;
 
-        // Remaining seconds until end_date
-        let remaining_secs = end_epoch.saturating_sub(now_epoch).max(1) as f64;
-        let windows_remaining = (remaining_secs / self.window_secs as f64).max(1.0);
-
-        // Adaptive: recalculates each check so delivery catches up or slows
-        let adaptive = remaining_imps as f64 / windows_remaining / nodes;
+        let adaptive_rate = remaining_imps / remaining_secs / nodes;
 
         // Flat rate: what even delivery would be across the full flight
-        let flight_start = deal
-            .start_date
-            .map(|s| s.timestamp() as u64)
-            .unwrap_or(now_epoch);
-        let total_flight_secs = (end_epoch.saturating_sub(flight_start)).max(1) as f64;
-        let total_windows = (total_flight_secs / self.window_secs as f64).max(1.0);
-        let flat_rate = limit as f64 / total_windows / nodes;
+        let total_secs = (end_epoch as f64
+            - deal
+                .start_date
+                .map(|s| s.timestamp() as f64)
+                .unwrap_or(now_secs))
+        .max(1.0);
+        let flat_rate = limit as f64 / total_secs / nodes;
 
-        // Clamp: safety cap prevents flooding, floor of 1.0 prevents stalling
-        let target = adaptive.min(flat_rate * self.safety_multiplier).max(1.0);
-
-        self.window_check(deal, target)
+        let rate = adaptive_rate.min(flat_rate * self.safety_multiplier);
+        self.try_bucket(&deal.id, rate, now_secs)
     }
 
     /// Even pacing for Total goal without end_date:
@@ -144,11 +95,45 @@ impl EvenDealPacer {
     }
 
     /// Even pacing for Daily goal:
-    /// steady daily_limit / windows_per_day / nodes rate.
+    /// adaptive catch-up using remaining / seconds_to_midnight / nodes,
+    /// capped by safety multiplier × flat daily rate.
     fn even_daily(&self, deal: &Deal, daily_limit: u64) -> bool {
-        let nodes = self.nodes();
-        let target = (daily_limit as f64 / self.windows_per_day() / nodes).max(1.0);
-        self.window_check(deal, target)
+        let now_secs = (self.fine_clock)();
+        let nodes = (self.cluster_size)().max(1) as f64;
+        let now_epoch = (self.clock)() as i64;
+        let remaining_secs =
+            (SECS_PER_DAY as i64 - (now_epoch % SECS_PER_DAY as i64)).max(1) as f64;
+
+        let delivered = self.effective_imps(&deal.id) as f64;
+        let remaining = (daily_limit as f64 - delivered).max(0.0);
+
+        let flat_rate = daily_limit as f64 / SECS_PER_DAY / nodes;
+        let adaptive_rate = remaining / remaining_secs / nodes;
+        let rate = adaptive_rate.min(flat_rate * self.safety_multiplier);
+        self.try_bucket(&deal.id, rate, now_secs)
+    }
+
+    /// Try to acquire one impression from the deal's token bucket.
+    /// Uses `get_mut` on the common path to avoid String clones.
+    fn try_bucket(&self, deal_id: &str, rate: f64, now_secs: f64) -> bool {
+        let max_burst = AdaptiveBucket::max_burst(rate, 1.0);
+
+        let acquired = if let Some(mut bucket) = self.buckets.get_mut(deal_id) {
+            bucket.try_acquire(1.0, rate, now_secs, max_burst)
+        } else {
+            self.buckets
+                .insert(deal_id.to_owned(), AdaptiveBucket::new(now_secs, 1.0));
+            if let Some(mut bucket) = self.buckets.get_mut(deal_id) {
+                bucket.try_acquire(1.0, rate, now_secs, max_burst)
+            } else {
+                false
+            }
+        };
+
+        if acquired {
+            self.reserve(deal_id);
+        }
+        acquired
     }
 }
 
@@ -159,7 +144,31 @@ impl DealPacer for EvenDealPacer {
             None => return true,
         };
 
-        match goal {
+        // Staleness guard: halt if tracker hasn't updated despite active bidding.
+        // Use the goal-appropriate metric so daily deals don't false-trigger
+        // after midnight when total stops changing.
+        let tracker_imps = match goal {
+            DeliveryGoal::Total(_) => self.tracker.total_impressions(&deal.id) as f64,
+            DeliveryGoal::Daily(_) => self.tracker.daily_impressions(&deal.id) as f64,
+        };
+        let now_secs = (self.fine_clock)();
+        if let Some(mut entry) = self.staleness.get_mut(&deal.id) {
+            if entry.check(tracker_imps, now_secs) {
+                warn!(
+                    deal = %deal.id,
+                    tracker_imps,
+                    "Tracker stale — halting deal bids"
+                );
+                return false;
+            }
+        } else {
+            self.staleness.insert(
+                deal.id.clone(),
+                TrackerStaleness::new(tracker_imps, now_secs),
+            );
+        }
+
+        let pass = match goal {
             DeliveryGoal::Total(limit) => {
                 let delivered = self.effective_imps(&deal.id);
                 if delivered >= *limit {
@@ -180,17 +189,34 @@ impl DealPacer for EvenDealPacer {
                 }
             }
             DeliveryGoal::Daily(daily_limit) => {
+                // Hard cap: today's delivered count (tracker + buffered ring)
+                let daily_delivered = self.tracker.daily_impressions(&deal.id)
+                    + self
+                        .rings
+                        .get(&deal.id)
+                        .map(|r| r.total() as u64)
+                        .unwrap_or(0);
+                if daily_delivered >= *daily_limit {
+                    return false;
+                }
+
                 match deal.pacing {
                     Some(DealPacing::Even) => self.even_daily(deal, *daily_limit),
                     Some(DealPacing::Fast) | None => {
-                        // Fast daily: hard cap per day, no spread
-                        // Ring naturally expires old slots, but we need
-                        // a day-scoped counter for the daily cap
-                        self.even_daily(deal, *daily_limit)
+                        self.reserve(&deal.id);
+                        true
                     }
                 }
             }
+        };
+
+        if pass {
+            if let Some(mut entry) = self.staleness.get_mut(&deal.id) {
+                entry.record_bid();
+            }
         }
+
+        pass
     }
 
     fn record_impression(&self, deal_id: &str) {
@@ -198,14 +224,26 @@ impl DealPacer for EvenDealPacer {
     }
 }
 
+impl EvenDealPacer {
+    /// Evict pacing state for a deal that is no longer active.
+    pub fn evict(&self, id: &str) {
+        self.rings.remove(id);
+        self.buckets.remove(id);
+        self.staleness.remove(id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::pipeline::ortb::direct::pacing::reservation::system_epoch_clock;
+    use crate::app::pipeline::ortb::direct::pacing::reservation::{
+        system_epoch_clock, system_fine_clock,
+    };
     use crate::core::models::common::Status;
     use crate::core::models::deal::{DealOwner, DealPricing, DealTargeting, DemandPolicy};
     use crate::core::models::targeting::CommonTargeting;
     use chrono::{DateTime, TimeZone, Utc};
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
     struct StubDealTracker {
         initial_imps: u64,
@@ -215,12 +253,12 @@ mod tests {
         fn total_impressions(&self, _deal_id: &str) -> u64 {
             self.initial_imps
         }
+        fn daily_impressions(&self, _deal_id: &str) -> u64 {
+            self.initial_imps
+        }
         fn record_impression(&self, _deal_id: &str) {}
     }
 
-    /// Tracker that reflects the true cumulative impression count set by the test.
-    /// Simulates what the billing pipeline does: periodically flush
-    /// counts to the persistent store so the pacer sees accurate totals.
     struct SyncDealTracker {
         total: AtomicU64,
     }
@@ -240,6 +278,9 @@ mod tests {
         fn total_impressions(&self, _deal_id: &str) -> u64 {
             self.total.load(Relaxed)
         }
+        fn daily_impressions(&self, _deal_id: &str) -> u64 {
+            self.total.load(Relaxed)
+        }
         fn record_impression(&self, _deal_id: &str) {}
     }
 
@@ -247,6 +288,13 @@ mod tests {
         let epoch = Arc::new(AtomicU64::new(start_epoch));
         let e = epoch.clone();
         let clock: EpochClock = Arc::new(move || e.load(Relaxed));
+        (clock, epoch)
+    }
+
+    fn fake_fine_clock(start_micros: u64) -> (FineClock, Arc<AtomicU64>) {
+        let epoch = Arc::new(AtomicU64::new(start_micros));
+        let e = epoch.clone();
+        let clock: FineClock = Arc::new(move || e.load(Relaxed) as f64 / 1_000_000.0);
         (clock, epoch)
     }
 
@@ -264,7 +312,7 @@ mod tests {
             id: "d1".into(),
             name: "test deal".into(),
             policy: DemandPolicy::Direct {
-                company_ids: vec!["co1".into()],
+                buyer_ids: vec!["co1".into()],
             },
             owner: DealOwner::Platform,
             pricing: DealPricing::Inherit,
@@ -290,7 +338,7 @@ mod tests {
             id: "d1".into(),
             name: "test deal".into(),
             policy: DemandPolicy::Direct {
-                company_ids: vec!["co1".into()],
+                buyer_ids: vec!["co1".into()],
             },
             owner: DealOwner::Platform,
             pricing: DealPricing::Inherit,
@@ -307,12 +355,21 @@ mod tests {
 
     fn make_pacer(initial_imps: u64) -> EvenDealPacer {
         let tracker = Arc::new(StubDealTracker { initial_imps });
-        EvenDealPacer::new(tracker, Box::new(|| 1), 60, system_epoch_clock())
+        EvenDealPacer::new(
+            tracker,
+            Box::new(|| 1),
+            system_epoch_clock(),
+            system_fine_clock(),
+        )
     }
 
-    fn make_pacer_with_clock(initial_imps: u64, clock: EpochClock) -> EvenDealPacer {
+    fn make_pacer_with_clocks(
+        initial_imps: u64,
+        clock: EpochClock,
+        fine_clock: FineClock,
+    ) -> EvenDealPacer {
         let tracker = Arc::new(StubDealTracker { initial_imps });
-        EvenDealPacer::new(tracker, Box::new(|| 1), 60, clock)
+        EvenDealPacer::new(tracker, Box::new(|| 1), clock, fine_clock)
     }
 
     /// Deals with no delivery goal bypass pacing entirely.
@@ -328,7 +385,6 @@ mod tests {
     fn total_fast_passes_until_limit() {
         let pacer = make_pacer(0);
         let deal = make_deal(Some(DeliveryGoal::Total(5)), Some(DealPacing::Fast), None);
-        // Should pass several times
         assert!(pacer.passes(&deal));
         assert!(pacer.passes(&deal));
     }
@@ -341,7 +397,7 @@ mod tests {
         assert!(!pacer.passes(&deal));
     }
 
-    /// Even pacing with a Total goal and end_date rate-limits within a window.
+    /// Even pacing with a Total goal and end_date rate-limits via bucket.
     #[test]
     fn total_even_with_end_date_rate_limited() {
         let pacer = make_pacer(0);
@@ -350,9 +406,7 @@ mod tests {
             Some(DealPacing::Even),
             Some(Utc::now() + chrono::Duration::hours(1)),
         );
-        // First pass should succeed
         assert!(pacer.passes(&deal));
-        // Eventually should reject within window
         let mut passes = 0;
         for _ in 0..500 {
             if pacer.passes(&deal) {
@@ -364,11 +418,10 @@ mod tests {
         assert!(passes < 500, "should eventually rate limit");
     }
 
-    /// Daily even pacing rate-limits to daily_limit / windows_per_day per window.
+    /// Daily even pacing rate-limits via bucket.
     #[test]
     fn daily_even_rate_limited() {
         let pacer = make_pacer(0);
-        // 10_000 daily / 1440 windows / 1 node ≈ 6.9 per window
         let deal = make_deal(
             Some(DeliveryGoal::Daily(10_000)),
             Some(DealPacing::Even),
@@ -386,23 +439,22 @@ mod tests {
         assert!(passes < 500, "should eventually rate limit");
     }
 
-    /// After exhausting a daily-even window, advancing the fake clock past
-    /// window_secs resets the counter and allows impressions again.
+    /// After draining bucket tokens, advancing the fine clock refills them
+    /// and allows impressions again (continuous refill).
     #[test]
-    fn even_daily_window_resets_after_advance() {
+    fn even_daily_tokens_refill_after_advance() {
         let start_epoch: u64 = 1_700_000_000;
-        let (clock, epoch) = fake_clock(start_epoch);
-        let pacer = make_pacer_with_clock(0, clock);
-        let window_secs = 60u64;
+        let (clock, coarse_epoch) = fake_clock(start_epoch);
+        let (fine_clock, fine_epoch) = fake_fine_clock(start_epoch * 1_000_000);
+        let pacer = make_pacer_with_clocks(0, clock, fine_clock);
 
-        // 10_000 daily / 1440 windows / 1 node ≈ 6.9 per window
         let deal = make_deal(
             Some(DeliveryGoal::Daily(10_000)),
             Some(DealPacing::Even),
             None,
         );
 
-        // Exhaust current window
+        // Drain bucket
         let mut passes = 0;
         for _ in 0..500 {
             if pacer.passes(&deal) {
@@ -414,23 +466,26 @@ mod tests {
         assert!(passes >= 1, "should pass at least once");
         assert!(passes < 500, "should eventually rate limit");
 
-        // Window exhausted
+        // Bucket drained
         assert!(!pacer.passes(&deal));
 
-        // Advance past window_secs → new window
-        epoch.store(start_epoch + window_secs, Relaxed);
-        assert!(pacer.passes(&deal), "should pass after window reset");
+        // Advance by 30 seconds → tokens refill
+        coarse_epoch.store(start_epoch + 30, Relaxed);
+        fine_epoch.store((start_epoch + 30) * 1_000_000, Relaxed);
+        assert!(
+            pacer.passes(&deal),
+            "should pass after time advance refills tokens"
+        );
     }
 
-    /// As remaining flight time shrinks, the adaptive rate increases (catch-up),
-    /// allowing more impressions per window when behind schedule.
+    /// As remaining flight time shrinks, the adaptive rate increases (catch-up).
     #[test]
     fn even_total_flight_adapts_as_time_passes() {
         let start_epoch: u64 = 1_700_000_000;
-        let (clock, epoch) = fake_clock(start_epoch);
-        let pacer = make_pacer_with_clock(0, clock);
+        let (clock, coarse_epoch) = fake_clock(start_epoch);
+        let (fine_clock, fine_epoch) = fake_fine_clock(start_epoch * 1_000_000);
+        let pacer = make_pacer_with_clocks(0, clock, fine_clock);
 
-        // 2h flight: start_epoch-3600 to start_epoch+3600, limit=1000
         let deal = make_deal_with_dates(
             Some(DeliveryGoal::Total(1000)),
             Some(DealPacing::Even),
@@ -438,7 +493,6 @@ mod tests {
             Some(epoch_to_dt(start_epoch + 3600)),
         );
 
-        // Count passes in early window
         let mut passes_early = 0;
         for _ in 0..500 {
             if pacer.passes(&deal) {
@@ -448,9 +502,11 @@ mod tests {
             }
         }
 
-        // Jump to 600s before end — remaining time shrinks, adaptive rate increases
-        // (tracker always returns 0, so remaining_imps stays at 1000)
-        epoch.store(start_epoch + 3600 - 600, Relaxed);
+        // Jump to 600s before end
+        let late_epoch = start_epoch + 3600 - 600;
+        coarse_epoch.store(late_epoch, Relaxed);
+        fine_epoch.store(late_epoch * 1_000_000, Relaxed);
+
         let mut passes_late = 0;
         for _ in 0..500 {
             if pacer.passes(&deal) {
@@ -460,20 +516,19 @@ mod tests {
             }
         }
 
-        // Adaptive rate should be higher when less time remains (but clamped by safety)
         assert!(
             passes_late > passes_early,
             "adaptive rate should increase when behind schedule: early={passes_early}, late={passes_late}"
         );
     }
 
-    /// Buffered ring impressions are fully evicted after SLOTS × bucket_width
-    /// seconds elapse, ensuring stale reservations don't block future delivery.
+    /// Buffered ring impressions are fully evicted after SLOTS × bucket_width.
     #[test]
     fn ring_eviction_across_windows() {
         let start_epoch: u64 = 1_700_000_000;
-        let (clock, epoch) = fake_clock(start_epoch);
-        let pacer = make_pacer_with_clock(0, clock);
+        let (clock, coarse_epoch) = fake_clock(start_epoch);
+        let (fine_clock, _) = fake_fine_clock(start_epoch * 1_000_000);
+        let pacer = make_pacer_with_clocks(0, clock, fine_clock);
 
         let deal = make_deal(
             Some(DeliveryGoal::Total(100_000)),
@@ -481,17 +536,14 @@ mod tests {
             None,
         );
 
-        // Reserve some impressions
         for _ in 0..5 {
             pacer.passes(&deal);
         }
 
-        // Ring should have buffered impressions
         let buffered_before = pacer.rings.get("d1").map(|r| r.total() as u64).unwrap_or(0);
         assert!(buffered_before > 0, "should have buffered imps");
 
-        // Advance past SLOTS × DEFAULT_BUCKET_SECS → ring fully evicted
-        epoch.store(start_epoch + DEFAULT_BUCKET_SECS * 6, Relaxed);
+        coarse_epoch.store(start_epoch + DEFAULT_BUCKET_SECS * 6, Relaxed);
         let buffered_after = pacer.rings.get("d1").map(|r| r.total() as u64).unwrap_or(0);
         assert_eq!(buffered_after, 0, "ring should be fully evicted");
     }
@@ -499,26 +551,22 @@ mod tests {
     // ---- Delivery accuracy, ceiling, & overshoot tests ----
 
     /// Simulates an entire 2-hour deal flight with even pacing and Total goal.
-    /// Steps through every window, delivers impressions until the pacer throttles,
-    /// then flushes the cumulative count to the tracker (simulating billing).
-    ///
-    /// Verifies total delivery lands within tolerance of the impression goal:
-    /// the adaptive algorithm should deliver most of the goal without overshooting.
     #[test]
     fn even_total_delivers_within_tolerance() {
         let start_epoch: u64 = 1_700_000_000;
-        let flight_secs: u64 = 7200; // 2 hours
-        let window_secs: u64 = 60;
+        let flight_secs: u64 = 7200;
+        let step_secs: u64 = 5;
         let goal: u64 = 1000;
-        let num_windows = flight_secs / window_secs; // 120
+        let num_steps = flight_secs / step_secs;
 
-        let (clock, epoch) = fake_clock(start_epoch);
+        let (clock, coarse_epoch) = fake_clock(start_epoch);
+        let (fine_clock, fine_epoch) = fake_fine_clock(start_epoch * 1_000_000);
         let tracker = Arc::new(SyncDealTracker::new());
         let pacer = EvenDealPacer::new(
             tracker.clone() as Arc<dyn DealImpressionTracker>,
             Box::new(|| 1),
-            window_secs,
             clock,
+            fine_clock,
         );
 
         let deal = make_deal_with_dates(
@@ -530,8 +578,10 @@ mod tests {
 
         let mut total_delivered: u64 = 0;
 
-        for w in 0..num_windows {
-            epoch.store(start_epoch + w * window_secs, Relaxed);
+        for w in 0..num_steps {
+            let t = start_epoch + w * step_secs;
+            coarse_epoch.store(t, Relaxed);
+            fine_epoch.store(t * 1_000_000, Relaxed);
 
             for _ in 0..1000 {
                 if pacer.passes(&deal) {
@@ -539,7 +589,6 @@ mod tests {
                 }
             }
 
-            // Simulate billing flush
             tracker.set_total(total_delivered);
         }
 
@@ -553,25 +602,23 @@ mod tests {
         );
     }
 
-    /// Simulates uneven supply: some windows have plenty of bid requests,
-    /// others have none. The adaptive algorithm should ramp up its rate
-    /// in windows that do have supply to compensate for dry windows,
-    /// delivering a reasonable fraction of the goal despite gaps.
+    /// Simulates uneven supply: adaptive rate catches up in supply windows.
     #[test]
     fn even_total_adapts_to_uneven_supply() {
         let start_epoch: u64 = 1_700_000_000;
         let flight_secs: u64 = 7200;
-        let window_secs: u64 = 60;
+        let step_secs: u64 = 5;
         let goal: u64 = 1000;
-        let num_windows = flight_secs / window_secs;
+        let num_steps = flight_secs / step_secs;
 
-        let (clock, epoch) = fake_clock(start_epoch);
+        let (clock, coarse_epoch) = fake_clock(start_epoch);
+        let (fine_clock, fine_epoch) = fake_fine_clock(start_epoch * 1_000_000);
         let tracker = Arc::new(SyncDealTracker::new());
         let pacer = EvenDealPacer::new(
             tracker.clone() as Arc<dyn DealImpressionTracker>,
             Box::new(|| 1),
-            window_secs,
             clock,
+            fine_clock,
         );
 
         let deal = make_deal_with_dates(
@@ -583,10 +630,11 @@ mod tests {
 
         let mut total_delivered: u64 = 0;
 
-        for w in 0..num_windows {
-            epoch.store(start_epoch + w * window_secs, Relaxed);
+        for w in 0..num_steps {
+            let t = start_epoch + w * step_secs;
+            coarse_epoch.store(t, Relaxed);
+            fine_epoch.store(t * 1_000_000, Relaxed);
 
-            // Even windows: plenty of supply. Odd windows: zero supply.
             let supply = if w % 2 == 0 { 500 } else { 0 };
 
             for _ in 0..supply {
@@ -598,8 +646,6 @@ mod tests {
             tracker.set_total(total_delivered);
         }
 
-        // With half the windows dry, the adaptive rate should catch up
-        // in the windows that have supply. Expect at least 70% delivery.
         assert!(
             total_delivered >= (goal as f64 * 0.70) as u64,
             "should deliver at least 70% with uneven supply: delivered {total_delivered}"
@@ -611,24 +657,22 @@ mod tests {
     }
 
     /// Verifies the safety multiplier caps the catch-up rate.
-    /// When a deal is far behind schedule, the adaptive rate would spike
-    /// to flood remaining impressions. The safety_multiplier (3×) clamps
-    /// the per-window target so no single window delivers more than
-    /// 3× the flat even rate — preventing burst flooding.
+    /// With rate-based bucket: initial tokens = max_burst = rate * BURST_SECS.
+    /// The safety-capped rate limits how many tokens are initially available.
     #[test]
     fn safety_cap_limits_catchup_rate() {
         let start_epoch: u64 = 1_700_000_000;
-        let flight_secs: u64 = 7200; // 2 hours
-        let window_secs: u64 = 60;
-        let goal: u64 = 1200; // 1200 imps across 120 windows → flat rate = 10/window
+        let flight_secs: u64 = 7200;
+        let goal: u64 = 1200;
 
-        let (clock, epoch) = fake_clock(start_epoch);
+        let (clock, coarse_epoch) = fake_clock(start_epoch);
+        let (fine_clock, fine_epoch) = fake_fine_clock(start_epoch * 1_000_000);
         let tracker = Arc::new(SyncDealTracker::new());
         let pacer = EvenDealPacer::new(
             tracker.clone() as Arc<dyn DealImpressionTracker>,
             Box::new(|| 1),
-            window_secs,
             clock,
+            fine_clock,
         );
 
         let deal = make_deal_with_dates(
@@ -638,49 +682,43 @@ mod tests {
             Some(epoch_to_dt(start_epoch + flight_secs)),
         );
 
-        // Deliver nothing for the first 100 windows — fall far behind
-        for w in 0..100 {
-            epoch.store(start_epoch + w * window_secs, Relaxed);
-        }
+        // Jump to window 100 (1200s remaining out of 7200s)
+        let late_epoch = start_epoch + 6000;
+        coarse_epoch.store(late_epoch, Relaxed);
+        fine_epoch.store(late_epoch * 1_000_000, Relaxed);
 
-        // Now jump to window 100 (20 windows remaining, 1200 imps remaining).
-        // Uncapped adaptive rate = 1200 / 20 = 60/window.
-        // Flat rate = 1200 / 120 = 10/window.
-        // Safety cap = 10 × 3 = 30/window.
-        // So the pacer should allow ~30, not 60.
-        epoch.store(start_epoch + 100 * window_secs, Relaxed);
-
-        let mut window_imps = 0u64;
+        let mut imps = 0u64;
         for _ in 0..200 {
             if pacer.passes(&deal) {
-                window_imps += 1;
+                imps += 1;
             }
         }
 
-        let flat_rate = goal as f64 / (flight_secs / window_secs) as f64; // 10
-        let max_allowed = (flat_rate * DEFAULT_SAFETY_MULTIPLIER).ceil() as u64; // 30
+        // flat_rate = 1200 / 7200 = 0.1667 imps/sec
+        // safety-capped rate = flat_rate * 3 = 0.5 imps/sec
+        // max_burst = 0.5 * 5.0 = 2.5, floored at 1.0
+        // So initial tokens are at most 2.5 → we can acquire at most ~2 imps instantly
+        // This verifies the safety cap prevents burst flooding
+        let flat_rate_per_sec = goal as f64 / flight_secs as f64;
+        let capped_rate = flat_rate_per_sec * DEFAULT_SAFETY_MULTIPLIER;
+        let max_burst_tokens = AdaptiveBucket::max_burst(capped_rate, 1.0);
 
         assert!(
-            window_imps <= max_allowed + 1, // +1 for rounding
-            "safety cap should limit to ~{max_allowed}/window, got {window_imps}"
+            imps <= max_burst_tokens.ceil() as u64 + 1,
+            "safety cap should limit initial burst: max_burst={max_burst_tokens}, got {imps}"
         );
-        assert!(
-            window_imps > flat_rate as u64,
-            "should allow above flat rate for catch-up: flat={flat_rate}, got {window_imps}"
-        );
+        assert!(imps >= 1, "should allow at least 1 imp");
     }
 
-    /// Verifies the hard impression cap prevents overshoot in single-threaded use.
-    /// When the tracker reports delivery near the limit, the pacer should allow
-    /// only enough impressions to reach exactly the goal, not beyond.
+    /// Verifies the hard impression cap prevents overshoot.
     #[test]
     fn hard_cap_prevents_overshoot() {
         let start_epoch: u64 = 1_700_000_000;
         let (clock, _) = fake_clock(start_epoch);
+        let (fine_clock, _) = fake_fine_clock(start_epoch * 1_000_000);
 
-        // Tracker reports 995 of 1000 already delivered
         let tracker = Arc::new(StubDealTracker { initial_imps: 995 });
-        let pacer = EvenDealPacer::new(tracker, Box::new(|| 1), 60, clock);
+        let pacer = EvenDealPacer::new(tracker, Box::new(|| 1), clock, fine_clock);
 
         let deal = make_deal_with_dates(
             Some(DeliveryGoal::Total(1000)),
@@ -689,7 +727,6 @@ mod tests {
             None,
         );
 
-        // Try many bids — should allow exactly 5 (995 + 5 = 1000, then >= limit)
         let mut total_allowed = 0u64;
         for _ in 0..1000 {
             if pacer.passes(&deal) {

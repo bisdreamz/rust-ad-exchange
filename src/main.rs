@@ -19,7 +19,9 @@ async fn main() {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    let startup_pipeline = build_start_pipeline("rex.yaml".into());
+    let config_file = std::env::args().nth(1).unwrap_or_else(|| "rex.yaml".into());
+
+    let startup_pipeline = build_start_pipeline(config_file.into());
     let startup_ctx = StartupContext {
         server: OnceLock::new(),
         ..Default::default()

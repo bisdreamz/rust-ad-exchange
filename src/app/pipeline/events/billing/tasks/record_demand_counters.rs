@@ -24,6 +24,13 @@ impl BlockingTask<BillingEventContext, Error> for RecordDemandBillingCountersTas
     fn run(&self, context: &BillingEventContext) -> Result<(), Error> {
         let _span = child_span_info!("record_demand_counters_task").entered();
 
+        // Direct campaign bids have no RTB bidder — skip demand counters
+        if let Some(notice) = context.bid_notice.get() {
+            if notice.direct.is_some() {
+                return Ok(());
+            }
+        }
+
         let details = context
             .details
             .get()

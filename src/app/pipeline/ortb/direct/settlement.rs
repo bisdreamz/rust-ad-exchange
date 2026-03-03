@@ -1,5 +1,6 @@
 use crate::core::models::campaign::{Campaign, PricingStrategy};
 use crate::core::models::deal::{Deal, DealPricing};
+use tracing::trace;
 
 /// Determines the effective bid price from the campaign strategy
 /// and optional deal pricing.
@@ -14,21 +15,33 @@ pub fn effective_price(campaign: &Campaign, deal: Option<&Deal>) -> f64 {
     };
 
     let Some(deal) = deal else {
+        trace!(campaign = %campaign.id, price = campaign_price, "Price from campaign strategy");
         return campaign_price;
     };
 
-    match &deal.pricing {
+    let price = match &deal.pricing {
         DealPricing::Fixed(p) => *p,
         DealPricing::Floor(floor) => campaign_price.max(*floor),
         DealPricing::Inherit => campaign_price,
-    }
+    };
+
+    trace!(
+        campaign = %campaign.id,
+        deal = %deal.id,
+        campaign_price = campaign_price,
+        deal_pricing = ?deal.pricing,
+        effective = price,
+        "Price from deal settlement"
+    );
+
+    price
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::models::campaign::{
-        Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
+        BudgetType, Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
     };
     use crate::core::models::common::Status;
     use crate::core::models::deal::{Deal, DealOwner, DealPricing, DealTargeting, DemandPolicy};
@@ -38,13 +51,14 @@ mod tests {
     fn stub_campaign(price: f64) -> Campaign {
         Campaign {
             status: Status::Active,
-            company_id: "co1".into(),
+            buyer_id: "co1".into(),
             id: "c1".into(),
             start_date: Utc::now() - chrono::Duration::hours(1),
             end_date: Utc::now() + chrono::Duration::hours(1),
             name: "test".into(),
             pacing: CampaignPacing::Fast,
             budget: 1000.0,
+            budget_type: BudgetType::Total,
             strategy: PricingStrategy::FixedPrice(price),
             advertiser_id: "adv1".into(),
             targeting: CampaignTargeting::default(),
@@ -57,7 +71,7 @@ mod tests {
             id: "d1".into(),
             name: "test deal".into(),
             policy: DemandPolicy::Direct {
-                company_ids: vec!["co1".into()],
+                buyer_ids: vec!["co1".into()],
             },
             owner: DealOwner::Platform,
             pricing,

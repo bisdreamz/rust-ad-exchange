@@ -4,7 +4,7 @@ use anyhow::Error;
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub struct BuyerManager {
     buyers: ArcSwap<HashMap<String, Arc<Buyer>>>,
@@ -26,18 +26,26 @@ impl BuyerManager {
     }
 
     fn load(&self, buyers: Vec<Buyer>) {
+        let total = buyers.len();
         let map: HashMap<String, Arc<Buyer>> = buyers
             .into_iter()
             .map(|b| (b.id.clone(), Arc::new(b)))
             .collect();
 
+        info!("Loaded {} buyers", total);
         self.buyers.store(Arc::new(map));
     }
 
     fn handle_event(&self, event: ProviderEvent<Buyer>) {
         match event {
-            ProviderEvent::Added(b) | ProviderEvent::Modified(b) => {
-                debug!("Buyer updated: {}", b.id);
+            ProviderEvent::Added(b) => {
+                debug!("Buyer added: {} ({})", b.buyer_name, b.id);
+                let mut map = (*self.buyers.load_full()).clone();
+                map.insert(b.id.clone(), Arc::new(b));
+                self.buyers.store(Arc::new(map));
+            }
+            ProviderEvent::Modified(b) => {
+                debug!("Buyer modified: {} ({})", b.buyer_name, b.id);
                 let mut map = (*self.buyers.load_full()).clone();
                 map.insert(b.id.clone(), Arc::new(b));
                 self.buyers.store(Arc::new(map));

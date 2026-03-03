@@ -29,6 +29,11 @@ impl BlockingTask<BillingEventContext, Error> for RecordPubBillingCountersTask {
             .get()
             .ok_or_else(|| anyhow!("No billing event details on context!"))?;
 
+        let notice = context
+            .bid_notice
+            .get()
+            .ok_or_else(|| anyhow!("No bid notice on billing context!"))?;
+
         let mut counters = PublisherCounters::default();
         counters.impression(details.cpm_gross, details.cpm_cost);
 
@@ -40,7 +45,7 @@ impl BlockingTask<BillingEventContext, Error> for RecordPubBillingCountersTask {
         self.pub_store.merge_impression(
             publisher.id.as_str(),
             publisher.name.as_str(),
-            details.bid_ad_format,
+            notice.format.as_str(),
             details.channel,
             details.device_type,
             &counters,

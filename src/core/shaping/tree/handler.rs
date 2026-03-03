@@ -1,14 +1,14 @@
+use crate::core::models::shaping::Metric;
 use crate::core::shaping::tree::serializers;
+use arc_swap::ArcSwap;
 use logictree::{Feature, PredictionHandler};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use arc_swap::ArcSwap;
-use smallvec::SmallVec;
-use crate::core::models::shaping::Metric;
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct HandlerState {
@@ -52,7 +52,7 @@ impl RtbPredictionOutput {
     /// calculated metric from this prediction node
     /// for the provided target metric KPI
     pub fn metric_value(&self, metric: &Metric) -> f32 {
-         match metric {
+        match metric {
             Metric::BidRate => self.bid_rate_percent(),
             Metric::Bvpm => self.bid_value_per_mille(),
             Metric::FillRate => self.fill_rate_percent(),
@@ -133,11 +133,13 @@ pub struct RtbPredictionHandler {
     // from a file! The current usage doesnt do
     // this anyway but note this limitation!
     #[serde(skip, default = "deserialized_metric_unsupported")]
-    metric: Arc<ArcSwap<Metric>>
+    metric: Arc<ArcSwap<Metric>>,
 }
 
 fn deserialized_metric_unsupported() -> Arc<ArcSwap<Metric>> {
-    panic!("Deserialized RtbPredictionHandler does not support metric swap and thus loading a saved model unsupported now");
+    panic!(
+        "Deserialized RtbPredictionHandler does not support metric swap and thus loading a saved model unsupported now"
+    );
 }
 
 impl RtbPredictionHandler {
@@ -158,7 +160,11 @@ impl RtbPredictionHandler {
     /// if a req has banner, video present - itll likely use
     /// the video metrics to value this request if it has
     /// higher average value
-    pub fn new(min_decision_auctions: u32, segment_ttl_secs: u32, metric: Arc<ArcSwap<Metric>>) -> RtbPredictionHandler {
+    pub fn new(
+        min_decision_auctions: u32,
+        segment_ttl_secs: u32,
+        metric: Arc<ArcSwap<Metric>>,
+    ) -> RtbPredictionHandler {
         Self {
             min_auctions: min_decision_auctions,
             segment_ttl_secs,
@@ -189,11 +195,15 @@ impl PredictionHandler<RtbTrainingInput, RtbPredictionOutput> for RtbPredictionH
         active_delta_secs >= self.segment_ttl_secs as u64
     }
 
-    fn new_instance(&self,) -> Self
+    fn new_instance(&self) -> Self
     where
         Self: Sized,
     {
-        RtbPredictionHandler::new(self.min_auctions, self.segment_ttl_secs, self.metric.clone())
+        RtbPredictionHandler::new(
+            self.min_auctions,
+            self.segment_ttl_secs,
+            self.metric.clone(),
+        )
     }
 
     fn resolve(

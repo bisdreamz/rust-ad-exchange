@@ -17,7 +17,7 @@ mod junk_filter;
 pub use junk_filter::JunkFilterTask;
 
 mod pub_lookup;
-pub use pub_lookup::PubLookupTask;
+pub use pub_lookup::PublisherEnabledCheckTask;
 
 mod schain_append;
 pub use schain_append::SchainAppendTask;

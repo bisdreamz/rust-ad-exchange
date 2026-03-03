@@ -17,8 +17,14 @@ impl BlockingTask<StartupContext, Error> for ShapersManagerLoadTask {
             .get()
             .ok_or_else(|| anyhow!("Bidder manager not initialized, cant setup shaping"))?;
 
+        let cluster = context
+            .cluster_manager
+            .get()
+            .ok_or_else(|| anyhow!("Cluster manager not initialized, cant setup shaping"))?
+            .clone();
+
         let shaper_manager = Arc::new(
-            ShaperManager::new(bidder_manager)
+            ShaperManager::new(bidder_manager, cluster)
                 .map_err(|e| anyhow!("Failed loading shaping manager: {:?}", e))?,
         );
 

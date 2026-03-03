@@ -3,7 +3,6 @@ use crate::core::firestore::counters::store::CounterStore;
 use crate::core::firestore::counters::{CounterBuffer, CounterValue};
 use crate::core::spec::{Channel, StatsDeviceType};
 use firestore::FirestoreDb;
-use rtb::utils::adm::AdFormat;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -204,7 +203,7 @@ impl PublisherCounterStore {
         &self,
         pub_id: &str,
         pub_name: &str,
-        format: AdFormat,
+        format: &str,
         channel: Channel,
         device_type: StatsDeviceType,
         counters: &PublisherCounters,
@@ -214,7 +213,7 @@ impl PublisherCounterStore {
 
         self.by_pub.merge(&[pub_id, pub_name, &ch, &dt], counters);
         self.by_format
-            .merge(&[pub_id, pub_name, format.as_str(), &ch, &dt], counters);
+            .merge(&[pub_id, pub_name, format, &ch, &dt], counters);
     }
 
     /// Record detail-tier stats for publisher dashboard.

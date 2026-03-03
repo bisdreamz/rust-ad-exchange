@@ -14,6 +14,14 @@ pub enum CampaignPacing {
     Fast,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BudgetType {
+    /// Total lifetime budget across the entire flight
+    Total,
+    /// Per-day spending cap, resets at midnight UTC
+    Daily,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PricingStrategy {
     FixedPrice(f64),
@@ -33,16 +41,22 @@ pub struct CampaignTargeting {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Campaign {
     pub status: Status,
-    /// The owning company ID of this
+    /// The owning buyer ID of this
     /// advertiser within our direct campaign system
-    pub company_id: String,
+    pub buyer_id: String,
     pub id: String,
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
     pub name: String,
     pub pacing: CampaignPacing,
     pub budget: f64,
+    #[serde(default = "default_budget_type")]
+    pub budget_type: BudgetType,
     pub strategy: PricingStrategy,
     pub advertiser_id: String,
     pub targeting: CampaignTargeting,
+}
+
+fn default_budget_type() -> BudgetType {
+    BudgetType::Total
 }

@@ -1,5 +1,8 @@
 use crate::app::http::extract_http_context;
 use crate::app::pipeline::ortb::{AuctionContext, HttpRequestContext};
+use crate::core::managers::PublisherManager;
+use crate::core::models::publisher::Publisher;
+use crate::core::spec::nobidreasons;
 use actix_web::HttpRequest;
 use anyhow::Error;
 use opentelemetry::metrics::{Counter, Histogram};
@@ -68,13 +71,13 @@ fn record_request_metric(
 
 async fn handle_bid_request_instrumented(
     auction_id: String,
-    pubid: String,
     source: String,
+    publisher: Arc<Publisher>,
     req: BidRequest,
     http: HttpRequestContext,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
 ) -> (BidResponseState, bool) {
-    let mut ctx = AuctionContext::new(auction_id, source, pubid, req, http);
+    let mut ctx = AuctionContext::new(auction_id, source, publisher, None, req, http);
 
     let pipeline_result = pipeline.run(&ctx).await;
 
@@ -98,6 +101,7 @@ async fn handle_bid_request(
     auction_id: String,
     pubid: String,
     source: String,
+    publisher: Arc<Publisher>,
     req: BidRequest,
     http: HttpRequestContext,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
@@ -110,7 +114,7 @@ async fn handle_bid_request(
         source = source,
     );
 
-    handle_bid_request_instrumented(auction_id, pubid, source, req, http, pipeline)
+    handle_bid_request_instrumented(auction_id, source, publisher, req, http, pipeline)
         .instrument(root_span)
         .await
 }
@@ -121,6 +125,7 @@ pub async fn json_bid_handler(
     req: FastJson<BidRequest>,
     http_req: HttpRequest,
     pipeline: Arc<Pipeline<AuctionContext, Error>>,
+    pub_manager: Arc<PublisherManager>,
     span_sample_rate: f32,
 ) -> JsonBidResponseState {
     let source = http_req.match_pattern().unwrap_or("unknown".to_string());
@@ -128,10 +133,25 @@ pub async fn json_bid_handler(
     let path = http_req.path().to_string();
     let http = extract_http_context(&http_req);
 
+    let publisher = match pub_manager.get(&pubid) {
+        Some(p) => p,
+        None => {
+            let brs = BidResponseState::NoBidReason {
+                reqid: auction_id,
+                nbr: nobidreasons::UNKNOWN_SELLER,
+                desc: Some("Unknown publisher"),
+            };
+            let duration = start.elapsed();
+            record_request_metric(path, &source, pubid, &brs, false, duration);
+            return JsonBidResponseState(brs);
+        }
+    };
+
     let (brs, pipeline_completed) = handle_bid_request(
         auction_id,
         pubid.clone(),
         path.clone(),
+        publisher,
         req.into_inner(),
         http,
         pipeline.clone(),

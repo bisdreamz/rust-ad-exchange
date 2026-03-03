@@ -21,8 +21,11 @@ impl Provider<Campaign> for ConfigCampaignProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<Campaign>) + Send + Sync>,
     ) -> Result<Vec<Campaign>, Error> {
-        self.config_manager.get().campaigns.clone().ok_or_else(|| {
-            anyhow::anyhow!("campaigns must be defined in config when Firestore is not configured")
-        })
+        Ok(self
+            .config_manager
+            .get()
+            .campaigns
+            .clone()
+            .unwrap_or_default())
     }
 }

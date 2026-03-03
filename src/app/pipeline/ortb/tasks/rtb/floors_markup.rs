@@ -1,6 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::core::demand::takerate;
-use anyhow::{Error, bail};
+use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
@@ -12,10 +12,7 @@ pub struct FloorsMarkupTask;
 
 impl FloorsMarkupTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
-        let publisher = match context.publisher.get() {
-            Some(publisher) => publisher,
-            None => bail!("publisher is present on ctx, cant markup floors!"),
-        };
+        let publisher = &context.publisher;
 
         let mut req = context.req.write();
 

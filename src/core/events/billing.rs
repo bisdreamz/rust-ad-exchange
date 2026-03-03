@@ -3,7 +3,6 @@ use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use derive_builder::Builder;
 use rtb::common::DataUrl;
-use rtb::utils::adm::AdFormat;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum::{Display, EnumString};
@@ -24,8 +23,6 @@ pub const FIELD_BIDDER_ID: &str = "bi";
 pub const FIELD_ENDPOINT_ID: &str = "ei";
 /// Url param key for publisher id
 pub const FIELD_PUB_ID: &str = "pi";
-/// Url param key for the bid ad format
-pub const FIELD_BID_AD_FORMAT: &str = "f";
 /// The location and invocation source of this event,
 /// see ['EventSource']
 pub const FIELD_EVENT_SOURCE: &str = "s";
@@ -62,7 +59,6 @@ pub struct BillingEvent {
     pub bidder_id: String,
     pub endpoint_id: String,
     pub pub_id: String,
-    pub bid_ad_format: AdFormat,
     pub event_source: Option<EventSource>,
     pub channel: Channel,
     pub device_type: StatsDeviceType,
@@ -73,9 +69,6 @@ pub struct BillingEvent {
 impl BillingEvent {
     /// Extracts a well structured ['BillingEvent'] from a ['DataUrl']
     pub fn from(data_url: &DataUrl) -> Result<Self, Error> {
-        let ad_format_str = data_url.get_required_string(FIELD_BID_AD_FORMAT)?;
-        let bid_ad_format = AdFormat::from_str(&ad_format_str)?;
-
         let event_source_str = data_url.get_required_string(FIELD_EVENT_SOURCE)?;
         let event_source = EventSource::from_str(&event_source_str)?;
 
@@ -103,7 +96,6 @@ impl BillingEvent {
             .bidder_id(data_url.get_required_string(FIELD_BIDDER_ID)?)
             .endpoint_id(data_url.get_required_string(FIELD_ENDPOINT_ID)?)
             .pub_id(data_url.get_required_string(FIELD_PUB_ID)?)
-            .bid_ad_format(bid_ad_format)
             .event_source(Some(event_source))
             .channel(channel)
             .device_type(device_type)
@@ -122,8 +114,7 @@ impl BillingEvent {
             .add_float(FIELD_CPM_COST, self.cpm_cost as f64)?
             .add_string(FIELD_BIDDER_ID, &self.bidder_id)?
             .add_string(FIELD_ENDPOINT_ID, &self.endpoint_id)?
-            .add_string(FIELD_PUB_ID, &self.pub_id)?
-            .add_string(FIELD_BID_AD_FORMAT, &self.bid_ad_format.to_string())?;
+            .add_string(FIELD_PUB_ID, &self.pub_id)?;
 
         if let Some(ref event_source) = self.event_source {
             data_url.add_string(FIELD_EVENT_SOURCE, &event_source.to_string())?;

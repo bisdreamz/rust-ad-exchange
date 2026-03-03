@@ -1,5 +1,6 @@
+use crate::core::models::buyer::Buyer;
 use crate::core::models::campaign::Campaign;
-use crate::core::models::creative::Creative;
+use crate::core::models::creative::{Creative, CreativeFormat};
 use crate::core::models::deal::Deal;
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
@@ -21,15 +22,19 @@ pub struct NoticeUrls {
 /// campaign counters without encoding IDs in the URL.
 #[derive(Clone, Debug)]
 pub struct DirectCampaignDetails {
+    pub buyer: Arc<Buyer>,
     pub campaign: Arc<Campaign>,
     pub creative: Arc<Creative>,
 }
 
 /// Per-bid cache entry combining demand notice URLs with
 /// optional direct campaign details and deal context
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct CachedBidNotice {
     pub urls: NoticeUrls,
+    /// The canonical ad format of this bid, resolved at
+    /// cache time from the creative (direct) or bid adm (RTB).
+    pub format: CreativeFormat,
     pub direct: Option<DirectCampaignDetails>,
     /// Deal this bid was matched through, if any.
     /// Present for both direct and RTB bids.

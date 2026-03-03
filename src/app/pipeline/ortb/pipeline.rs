@@ -9,7 +9,7 @@ use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use pipeline::{AsyncTask, Pipeline, PipelineBuilder};
 use rtb::child_span_info;
-use tracing::Instrument;
+use tracing::{Instrument, debug};
 
 // ---------------------------------------------------------------------------
 // Enrichment — always runs, resolves pub/device/identity/filters
@@ -32,20 +32,13 @@ fn build_enrichment_pipeline(
         .take()
         .ok_or(anyhow!("Device lookup not set"))?;
 
-    let pub_manager = context
-        .pub_manager
-        .get()
-        .ok_or(anyhow!("No publisher manager"))?;
-
     let config = context
         .config
         .get()
         .ok_or(anyhow!("Config not set when building enrichment pipeline"))?;
 
     let pipeline = PipelineBuilder::new()
-        .with_blocking(Box::new(tasks::enrichment::PubLookupTask::new(
-            pub_manager.clone(),
-        )))
+        .with_blocking(Box::new(tasks::enrichment::PublisherEnabledCheckTask))
         .with_blocking(Box::new(tasks::enrichment::ValidateRequestTask))
         .with_blocking(Box::new(tasks::enrichment::SchainHopsGlobalFilter::new(
             config.schain_limit,
@@ -70,17 +63,12 @@ fn build_enrichment_pipeline(
 }
 
 // ---------------------------------------------------------------------------
-// RTB sub-pipeline — bidder matching, callouts, post-processing
+// RTB sub-pipeline — bidder matching, callouts, deal attribution
 // ---------------------------------------------------------------------------
 
 fn build_rtb_sub_pipeline(
     context: &StartupContext,
 ) -> Result<Pipeline<AuctionContext, Error>, Error> {
-    let demand_url_cache = context
-        .demand_url_cache
-        .get()
-        .ok_or_else(|| anyhow!("Demand url cache not set"))?;
-
     let cluster_manager = context
         .cluster_manager
         .get()
@@ -101,19 +89,21 @@ fn build_rtb_sub_pipeline(
         .get()
         .ok_or_else(|| anyhow!("No sync store"))?;
 
-    let config = context
-        .config
-        .get()
-        .ok_or(anyhow!("Config not set when building RTB sub-pipeline"))?;
-
     let demand_client =
         DemandClient::new().or_else(|e| bail!("RTB pipeline client failed: {}", e))?;
 
-    let events_config = &config.notifications;
+    let deal_manager = context
+        .deal_manager
+        .get()
+        .ok_or(anyhow!("No deal manager"))?;
+
+    let deal_pacer = context.deal_pacer.get().ok_or(anyhow!("No deal pacer"))?;
 
     let pipeline = PipelineBuilder::new()
         .with_async(Box::new(tasks::rtb::BidderMatchingTask::new(
             bidder_manager.clone(),
+            deal_manager.clone(),
+            deal_pacer.clone(),
         )))
         .with_async(Box::new(tasks::rtb::FloorsMarkupTask))
         .with_async(Box::new(tasks::rtb::IdentityDemandTask::new(
@@ -128,7 +118,37 @@ fn build_rtb_sub_pipeline(
             cluster_manager.clone(),
         )))
         .with_async(Box::new(tasks::rtb::BidderCalloutsTask::new(demand_client)))
-        .with_async(Box::new(tasks::rtb::TestBidderTask))
+        .with_async(Box::new(tasks::rtb::RtbDealAttributionTask::new(
+            deal_manager.clone(),
+        )))
+        .build()
+        .expect("RTB sub-pipeline should have tasks");
+
+    Ok(pipeline)
+}
+
+// ---------------------------------------------------------------------------
+// Shared bid pipeline — runs after merge on ALL bids (direct + RTB) uniformly
+// as both direct campaign bids and rtb bids will share the context.res
+// bid settlement object
+// ---------------------------------------------------------------------------
+
+fn build_shared_bid_pipeline(
+    context: &StartupContext,
+) -> Result<Pipeline<AuctionContext, Error>, Error> {
+    let demand_url_cache = context
+        .demand_url_cache
+        .get()
+        .ok_or_else(|| anyhow!("Demand url cache not set"))?;
+
+    let config = context
+        .config
+        .get()
+        .ok_or(anyhow!("Config not set when building shared bid pipeline"))?;
+
+    let events_config = &config.notifications;
+
+    let pipeline = PipelineBuilder::new()
         .with_async(Box::new(tasks::rtb::BidMarginTask))
         .with_async(Box::new(tasks::rtb::NotificationsUrlCreationTask::new(
             events_config.domain.clone(),
@@ -139,7 +159,7 @@ fn build_rtb_sub_pipeline(
             demand_url_cache.clone(),
         )))
         .build()
-        .expect("RTB sub-pipeline should have tasks");
+        .expect("Shared bid pipeline should have tasks");
 
     Ok(pipeline)
 }
@@ -163,20 +183,23 @@ impl AsyncTask<AuctionContext, Error> for ConditionalRtbTask {
     async fn run(&self, ctx: &AuctionContext) -> Result<(), Error> {
         let fill_policy = ctx
             .placement
-            .get()
+            .as_ref()
             .map(|p| &p.fill_policy)
             .unwrap_or(&FillPolicy::HighestPrice);
 
-        let direct_filled = !ctx.bidders.lock().await.is_empty();
-
         let run_rtb = match fill_policy {
             FillPolicy::DealsOnly | FillPolicy::DirectOnly => false,
-            FillPolicy::DirectAndRtbDeals => !direct_filled,
+            // RTB always runs — deal restriction is enforced by BidderMatchingTask
+            // (skips non-deal bidders) and settlement (filters non-deal bids)
+            FillPolicy::DirectAndRtbDeals => true,
             FillPolicy::RtbBackfill | FillPolicy::HighestPrice => true,
         };
 
         if run_rtb {
+            debug!("Running RTB sub-pipeline");
             self.rtb_pipeline.run(ctx).await?;
+        } else {
+            debug!(fill_policy = ?fill_policy, "RTB skipped");
         }
 
         Ok(())
@@ -184,7 +207,7 @@ impl AsyncTask<AuctionContext, Error> for ConditionalRtbTask {
 }
 
 // ---------------------------------------------------------------------------
-// Finalizers — always runs, persists counters
+// Finalizers — always runs, persists counters and any database stats
 // ---------------------------------------------------------------------------
 
 fn build_finalizers_pipeline(
@@ -213,20 +236,16 @@ fn build_finalizers_pipeline(
         pipeline_builder.add_async(Box::new(DemandCountersTask::new(demand_store.clone())));
     }
 
-    // Campaign counters — only if campaign store + buyer/advertiser managers loaded
+    // Campaign counters — only if campaign store + advertiser manager loaded
     let campaign_store_opt = context
         .counters_campaign_store
         .get()
         .ok_or_else(|| anyhow!("No campaign counter store option set on context"))?;
 
     if let Some(campaign_store) = campaign_store_opt {
-        if let (Some(buyer_mgr), Some(adv_mgr)) = (
-            context.buyer_manager.get(),
-            context.advertiser_manager.get(),
-        ) {
+        if let Some(adv_mgr) = context.advertiser_manager.get() {
             pipeline_builder.add_async(Box::new(CampaignCountersTask::new(
                 campaign_store.clone(),
-                buyer_mgr.clone(),
                 adv_mgr.clone(),
             )));
         }
@@ -236,14 +255,16 @@ fn build_finalizers_pipeline(
 }
 
 // ---------------------------------------------------------------------------
-// Top-level auction orchestrator — enrichment → direct → conditional RTB
-//   → settlement → finalizers
+// Top-level auction orchestrator
+//   enrichment → direct → [test bidder] → conditional RTB → merge → shared bids → settlement → finalizers
 // ---------------------------------------------------------------------------
 
 struct AuctionOrchestratorTask {
     enrichment_pipeline: Pipeline<AuctionContext, Error>,
     direct_task: Option<Box<dyn AsyncTask<AuctionContext, Error>>>,
     conditional_rtb: ConditionalRtbTask,
+    merge_task: tasks::direct::MergeDirectBidsTask,
+    shared_pipeline: Pipeline<AuctionContext, Error>,
     finalizers_pipeline: Option<Pipeline<AuctionContext, Error>>,
 }
 
@@ -253,27 +274,47 @@ impl AuctionOrchestratorTask {
         // Errors here abort the auction (bad request, blocked IP, etc.)
         self.enrichment_pipeline.run(ctx).await?;
 
-        // Phase 2: Direct campaign matching (no-ops if no campaigns loaded)
+        // Phase 2: Direct campaign matching → staging
         if let Some(direct_task) = &self.direct_task {
             // Direct matching never errors — misses are silent
             let _ = direct_task.run(ctx).await;
         }
 
-        // Phase 3: RTB — conditionally runs based on fill policy + direct outcome
-        let rtb_res = self.conditional_rtb.run(ctx).await;
+        // Phase 2b: Test bidder — injects synthetic bids as direct bids
+        // when force_bid is set and no real direct bids were produced.
+        if ctx.direct_bid_staging.lock().await.is_empty() {
+            let _ = tasks::rtb::TestBidderTask.run(ctx).await;
+        }
 
-        // Phase 4: Settlement — picks winner from direct + RTB bids
-        // Runs regardless of RTB result so direct bids can still settle
+        // Phase 3: RTB — conditionally runs, writes to bidders + rtb_nbr.
+        // Errors are only surfaced if no direct bids were produced,
+        // since direct bids alone can satisfy the auction.
+        let rtb_err = self.conditional_rtb.run(ctx).await.err();
+
+        // Phase 4: Merge direct staging into bidders
+        let merge_res = self.merge_task.run(ctx).await;
+
+        // Phase 5: Shared bid tasks (margin, notice URLs, shaping, injection)
+        let shared_res = self.shared_pipeline.run(ctx).await;
+
+        // Phase 6: Settlement
         let settlement_res = tasks::settlement::BidSettlementTask.run(ctx).await;
 
-        // Phase 5: Finalizers — always run, persist counters
+        // Phase 7: Finalizers — ALWAYS run regardless of auction errors.
+        // Counters and events must be persisted for any work done above.
         if let Some(finalizers) = &self.finalizers_pipeline {
             finalizers.run(ctx).await?;
         }
 
-        // Return earliest error from RTB or settlement
-        rtb_res?;
-        settlement_res
+        // Surface RTB error if no bids were produced from any source
+        if let Some(e) = rtb_err {
+            if ctx.bidders.lock().await.is_empty() {
+                return Err(e);
+            }
+        }
+
+        // Return the first error from phases 4-6, if any
+        merge_res.and(shared_res).and(settlement_res)
     }
 }
 
@@ -291,19 +332,24 @@ impl AsyncTask<AuctionContext, Error> for AuctionOrchestratorTask {
 
 /// Builds the pipeline for which an openrtb request flows through for auction handling.
 /// This can be pre-fixed by other inbound adapters such as prebid, which should then
-/// adapt to a bidrequest to be passed through this pipeline.
+/// adapt to a bidrequest to be passed through this pipeline. RTB pipeline
+/// is skipped for requests with a ['Placement'] present and a policy which
+/// disallows RTB *or* prioritizes direct campaign bids over RTB demand.
 ///
 /// # Phases
 /// 1. **Enrichment** — pub lookup, validation, device, identity (always runs)
-/// 2. **Direct campaign matching** — matches campaigns + deals per imp (always runs, no-ops if empty)
-/// 3. **Conditional RTB** — bidder matching, callouts, post-processing (skipped when direct fills)
-/// 4. **Settlement** — picks winner from direct + RTB bids (always runs)
-/// 5. **Finalizers** — persists counters (always runs)
+/// 2. **Direct campaign matching** — matches campaigns + deals per imp → staging
+/// 3. **Conditional RTB** — bidder matching, callouts → bidders + rtb_nbr
+/// 4. **Merge** — moves staged direct bids into bidders
+/// 5. **Shared bid tasks** — margin, notice URLs, shaping, injection (all bids uniform)
+/// 6. **Settlement** — picks winner from unified bidders list
+/// 7. **Finalizers** — persists counters (always runs)
 pub fn build_auction_pipeline(
     context: &StartupContext,
 ) -> Result<Pipeline<AuctionContext, Error>, Error> {
     let enrichment_pipeline = build_enrichment_pipeline(context)?;
     let rtb_sub_pipeline = build_rtb_sub_pipeline(context)?;
+    let shared_pipeline = build_shared_bid_pipeline(context)?;
     let finalizers_pipeline = build_finalizers_pipeline(context)?;
 
     // Direct campaign task — optional, only if managers were loaded
@@ -313,14 +359,16 @@ pub fn build_auction_pipeline(
         context.deal_manager.get(),
         context.spend_pacer.get(),
         context.deal_pacer.get(),
+        context.buyer_manager.get(),
     ) {
-        (Some(cm), Some(crm), Some(dm), Some(sp), Some(dp)) => {
+        (Some(cm), Some(crm), Some(dm), Some(sp), Some(dp), Some(bm)) => {
             Some(Box::new(tasks::direct::DirectCampaignMatchingTask::new(
                 cm.clone(),
                 crm.clone(),
                 dm.clone(),
                 sp.clone(),
                 dp.clone(),
+                bm.clone(),
             )))
         }
         _ => None,
@@ -330,6 +378,8 @@ pub fn build_auction_pipeline(
         enrichment_pipeline,
         direct_task,
         conditional_rtb: ConditionalRtbTask::new(rtb_sub_pipeline),
+        merge_task: tasks::direct::MergeDirectBidsTask,
+        shared_pipeline,
         finalizers_pipeline,
     };
 

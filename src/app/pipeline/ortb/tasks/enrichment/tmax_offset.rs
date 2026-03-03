@@ -1,5 +1,5 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::{KeyValue, global};
 use pipeline::BlockingTask;
@@ -24,10 +24,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for TmaxOffsetTask {
     fn run(&self, context: &AuctionContext) -> Result<(), Error> {
         let span = child_span_info!("tmax_offset_task", tmax = tracing::field::Empty);
 
-        let publisher = context
-            .publisher
-            .get()
-            .ok_or_else(|| anyhow!("No publisher set on context"))?;
+        let publisher = &context.publisher;
 
         let attrs = vec![
             KeyValue::new("pub_id", publisher.id.clone()),

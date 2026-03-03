@@ -3,8 +3,9 @@ use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::events::billing::tasks::{
     BailIfExpiredTask, CacheNoticeUrlsValidationTask, ExtractBillingEventTask, FireDemandBurlTask,
     MarkIfExpiredTask, ParseDataUrlTask, RecordBillingMetricsTask,
-    RecordCampaignBillingCountersTask, RecordDemandBillingCountersTask,
-    RecordPubBillingCountersTask, RecordShapingEventsTask,
+    RecordCampaignBillingCountersTask, RecordDealBillingCountersTask,
+    RecordDemandBillingCountersTask, RecordPacingTask, RecordPubBillingCountersTask,
+    RecordShapingEventsTask,
 };
 use anyhow::{Error, anyhow, bail};
 use pipeline::{Pipeline, PipelineBuilder};
@@ -72,46 +73,48 @@ pub fn build_event_pipeline(
         )));
     }
 
+    // Pacing updates — always run regardless of Firestore
+    let spend_tracker = context
+        .spend_tracker
+        .get()
+        .ok_or_else(|| anyhow!("No spend tracker on context!"))?;
+
+    let deal_pacer = context
+        .deal_pacer
+        .get()
+        .ok_or_else(|| anyhow!("No deal pacer on context!"))?;
+
+    builder.add_blocking(Box::new(RecordPacingTask::new(
+        spend_tracker.clone(),
+        deal_pacer.clone(),
+    )));
+
+    // Deal counters — platform-wide, runs for both direct and RTB bids
+    if let Some(deal_store) = context
+        .counters_deal_store
+        .get()
+        .ok_or_else(|| anyhow!("No deal counter store option set on context"))?
+    {
+        builder.add_blocking(Box::new(RecordDealBillingCountersTask::new(
+            deal_store.clone(),
+        )));
+    }
+
+    // Campaign counters — only for direct bids
     if let Some(campaign_store) = campaign_store_opt {
         let pub_store = pub_store_opt
             .clone()
             .ok_or_else(|| anyhow!("Campaign store set but no pub counter store!"))?;
-
-        let deal_store = context
-            .counters_deal_store
-            .get()
-            .ok_or_else(|| anyhow!("Campaign store set but no deal counter store option!"))?
-            .clone()
-            .ok_or_else(|| anyhow!("Campaign store set but deal counter store is None!"))?;
-
-        let buyer_manager = context
-            .buyer_manager
-            .get()
-            .ok_or_else(|| anyhow!("Campaign store set but no buyer manager!"))?;
 
         let advertiser_manager = context
             .advertiser_manager
             .get()
             .ok_or_else(|| anyhow!("Campaign store set but no advertiser manager!"))?;
 
-        let spend_tracker = context
-            .spend_tracker
-            .get()
-            .ok_or_else(|| anyhow!("Campaign store set but no spend tracker!"))?;
-
-        let deal_pacer = context
-            .deal_pacer
-            .get()
-            .ok_or_else(|| anyhow!("Campaign store set but no deal pacer!"))?;
-
         builder.add_blocking(Box::new(RecordCampaignBillingCountersTask::new(
             campaign_store.clone(),
-            deal_store,
             pub_store,
-            buyer_manager.clone(),
             advertiser_manager.clone(),
-            spend_tracker.clone(),
-            deal_pacer.clone(),
         )));
     }
 

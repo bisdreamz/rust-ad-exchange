@@ -1,5 +1,6 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState};
+use crate::core::models::placement::FillPolicy;
 use crate::core::spec::nobidreasons;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
@@ -24,14 +25,18 @@ pub fn sort_seats_by_highest_bid(seats: &mut [SeatBid]) {
 pub struct BidSettlementTask;
 
 impl BidSettlementTask {
-    fn build_bidder_seat_bids(&self, bidder_context: &BidderContext) -> Vec<Bid> {
+    /// Returns Vec<(Bid, takes_priority)> for a single bidder context.
+    fn build_bidder_seat_bids(
+        &self,
+        bidder_context: &BidderContext,
+        fill_policy: &FillPolicy,
+    ) -> Vec<(Bid, bool)> {
         let mut seat_bids = Vec::with_capacity(bidder_context.callouts.len());
 
         for callout in bidder_context.callouts.iter() {
             let response_opt = &callout.response.get();
 
             if response_opt.is_none() {
-                // warn!("Had callout without any response state assigned!");
                 continue;
             }
 
@@ -44,10 +49,27 @@ impl BidSettlementTask {
 
             for seat_context in &bid_response.seatbids {
                 for bid_context in &seat_context.bids {
-                    match &bid_context.filter_reason {
-                        Some((_, reason)) => debug!("Skipping bid because: {}", reason),
-                        None => seat_bids.push(bid_context.bid.clone()),
+                    if let Some((_, reason)) = &bid_context.filter_reason {
+                        debug!("Skipping bid because: {}", reason);
+                        continue;
                     }
+
+                    // Under DirectAndRtbDeals, filter out pure open-auction RTB bids —
+                    // only bids with a deal or direct campaign pass
+                    if matches!(fill_policy, FillPolicy::DirectAndRtbDeals)
+                        && bid_context.deal.get().is_none()
+                        && bid_context.direct.get().is_none()
+                    {
+                        continue;
+                    }
+
+                    let takes_priority = bid_context
+                        .deal
+                        .get()
+                        .map(|d| d.takes_priority)
+                        .unwrap_or(false);
+
+                    seat_bids.push((bid_context.bid.clone(), takes_priority));
                 }
             }
         }
@@ -55,17 +77,25 @@ impl BidSettlementTask {
         seat_bids
     }
 
-    fn build_seats(&self, bidders: &Vec<BidderContext>) -> Vec<SeatBid> {
+    /// Returns Vec<(SeatBid, has_priority_bid)> for all bidders (RTB + merged direct).
+    fn build_seats(
+        &self,
+        bidders: &Vec<BidderContext>,
+        fill_policy: &FillPolicy,
+    ) -> Vec<(SeatBid, bool)> {
         let mut seats = Vec::with_capacity(bidders.len());
 
         for bidder in bidders.iter() {
-            let mut seat_bids = self.build_bidder_seat_bids(bidder);
+            let bid_pairs = self.build_bidder_seat_bids(bidder, fill_policy);
 
-            sort_bids_by_price(&mut seat_bids);
+            let has_priority = bid_pairs.iter().any(|(_, p)| *p);
+            let mut bids: Vec<Bid> = bid_pairs.into_iter().map(|(b, _)| b).collect();
+
+            sort_bids_by_price(&mut bids);
 
             let bidder_seat_result = SeatBidBuilder::default()
-                .seat(bidder.bidder.name.clone())
-                .bid(seat_bids)
+                .seat(bidder.bidder.id.clone())
+                .bid(bids)
                 .build();
 
             let bidder_seat = match bidder_seat_result {
@@ -81,7 +111,7 @@ impl BidSettlementTask {
             };
 
             if !bidder_seat.bid.is_empty() {
-                seats.push(bidder_seat);
+                seats.push((bidder_seat, has_priority));
             }
         }
 
@@ -89,22 +119,48 @@ impl BidSettlementTask {
     }
 
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
+        let span = tracing::Span::current();
         let bidders = context.bidders.lock().await;
+        span.record("bidders", tracing::field::debug(&bidders));
 
-        let mut seats = self.build_seats(&bidders);
+        let fill_policy = context
+            .placement
+            .as_ref()
+            .map(|p| &p.fill_policy)
+            .unwrap_or(&FillPolicy::HighestPrice);
+
+        let seat_pairs = self.build_seats(&bidders, fill_policy);
+
+        // If any seat has a priority deal bid, keep only priority seats
+        let any_priority = seat_pairs.iter().any(|(_, p)| *p);
+        let mut seats: Vec<SeatBid> = if any_priority {
+            seat_pairs
+                .into_iter()
+                .filter(|(_, p)| *p)
+                .map(|(s, _)| s)
+                .collect()
+        } else {
+            seat_pairs.into_iter().map(|(s, _)| s).collect()
+        };
 
         if seats.is_empty() {
+            let (nbr, desc) = context
+                .rtb_nbr
+                .get()
+                .map(|(n, d)| (*n, *d))
+                .unwrap_or((nobidreasons::NO_CAMPAIGNS_FOUND, "No bids received"));
+
             let final_nobid_state = BidResponseState::NoBidReason {
                 reqid: context.original_auction_id.clone(),
-                nbr: nobidreasons::NO_CAMPAIGNS_FOUND,
-                desc: Some("No bids received"),
+                nbr,
+                desc: Some(desc),
             };
 
             if let Err(_) = context.res.set(final_nobid_state) {
                 bail!("Built final no bid response but one already assigned?!");
             }
 
-            debug!("Assigned no bid response to context");
+            span.record("outcome", "nobid");
 
             return Ok(());
         }
@@ -138,6 +194,9 @@ impl BidSettlementTask {
 
         let final_bid_response_state = BidResponseState::Bid(final_bid_response_result?);
 
+        span.record("outcome", "bid");
+        span.record("response", tracing::field::debug(&final_bid_response_state));
+
         if let Err(_) = context.res.set(final_bid_response_state) {
             bail!("Built final bid response but one already assigned?!");
         }
@@ -151,7 +210,12 @@ impl BidSettlementTask {
 #[async_trait]
 impl AsyncTask<AuctionContext, Error> for BidSettlementTask {
     async fn run(&self, context: &AuctionContext) -> Result<(), Error> {
-        let span = child_span_info!("bid_settlement_task");
+        let span = child_span_info!(
+            "bid_settlement_task",
+            outcome = tracing::field::Empty,
+            bidders = tracing::field::Empty,
+            response = tracing::field::Empty,
+        );
 
         self.run0(context).instrument(span).await
     }

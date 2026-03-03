@@ -1,6 +1,9 @@
 mod bidder_callouts;
 pub use bidder_callouts::BidderCalloutsTask;
 
+mod deal_attribution;
+pub use deal_attribution::RtbDealAttributionTask;
+
 mod bidder_matching;
 pub use bidder_matching::BidderMatchingTask;
 

@@ -179,10 +179,14 @@ fn extract_buyer_user_matched(req: &BidRequest) -> Feature {
         DistributionchannelOneof::Site(_) => {
             req.user.is_some() && !req.user.as_ref().unwrap().buyeruid.is_empty()
         }
-        DistributionchannelOneof::App(_) => {
-            let ifa = &req.device.as_ref().unwrap().ifa;
-            !ifa.is_empty() && !ifa.starts_with("0000")
-        }
+        DistributionchannelOneof::App(_) => match &req.device {
+            Some(device) => {
+                let ifa = &device.ifa;
+
+                !ifa.is_empty() && !ifa.starts_with("0000")
+            }
+            None => false,
+        },
         _ => true, // just treat as matched for other channels for now
     };
 

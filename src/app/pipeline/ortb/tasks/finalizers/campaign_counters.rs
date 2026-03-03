@@ -1,45 +1,40 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::BidderResponseState;
 use crate::core::firestore::counters::campaign::{CampaignCounterStore, CampaignCounters};
-use crate::core::managers::{AdvertiserManager, BuyerManager};
+use crate::core::managers::AdvertiserManager;
 use crate::core::spec::StatsDeviceType;
 use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
 use std::sync::Arc;
-use tracing::{Instrument, warn};
+use tracing::Instrument;
 
 /// Records auction-phase bid counts for direct campaigns.
 ///
-/// Iterates all bidder contexts, finds direct bids via
-/// `bid_ctx.direct`, and merges auction/bid stats to the
-/// campaign counter store. Impressions are recorded separately
+/// Iterates the unified `bidders` list and checks each bid for
+/// `direct` context — this ensures we see the post-merge filter
+/// state (e.g. bids filtered by shared tasks like margin or
+/// notice URL injection). Impressions are recorded separately
 /// in the billing pipeline when the billing event fires.
 pub struct CampaignCountersTask {
     store: Arc<CampaignCounterStore>,
-    buyer_manager: Arc<BuyerManager>,
     advertiser_manager: Arc<AdvertiserManager>,
 }
 
 impl CampaignCountersTask {
     pub fn new(
         store: Arc<CampaignCounterStore>,
-        buyer_manager: Arc<BuyerManager>,
         advertiser_manager: Arc<AdvertiserManager>,
     ) -> Self {
         Self {
             store,
-            buyer_manager,
             advertiser_manager,
         }
     }
 
     async fn run0(&self, ctx: &AuctionContext) -> Result<(), Error> {
-        let publisher = match ctx.publisher.get() {
-            Some(p) => p,
-            None => return Ok(()), // unrecognized seller — nothing to record
-        };
+        let publisher = &ctx.publisher;
 
         let device = ctx.device.get();
         let dev_os = device.map(|d| d.os.to_string()).unwrap_or_default();
@@ -58,24 +53,27 @@ impl CampaignCountersTask {
 
         let bidders = ctx.bidders.lock().await;
 
-        for bidder in bidders.iter() {
-            for callout in &bidder.callouts {
-                let Some(response) = callout.response.get() else {
-                    continue;
+        for bidder_ctx in bidders.iter() {
+            for callout in &bidder_ctx.callouts {
+                let response = match callout.response.get() {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let bid_response = match &response.state {
+                    BidderResponseState::Bid(br) => br,
+                    _ => continue,
                 };
 
-                let BidderResponseState::Bid(resp_ctx) = &response.state else {
-                    continue;
-                };
-
-                for seat in &resp_ctx.seatbids {
+                for seat in &bid_response.seatbids {
                     for bid_ctx in &seat.bids {
-                        let Some(direct) = bid_ctx.direct.get() else {
-                            continue; // RTB bid — skip
+                        let direct = match bid_ctx.direct.get() {
+                            Some(d) => d,
+                            None => continue,
                         };
 
                         let campaign = &direct.campaign;
                         let creative = &direct.creative;
+                        let buyer_name = &direct.buyer.buyer_name;
                         let deal_id = bid_ctx.deal.get().map(|d| d.id.as_str()).unwrap_or("");
 
                         let mut counters = CampaignCounters::default();
@@ -86,18 +84,6 @@ impl CampaignCountersTask {
                             counters.bids_filtered(1);
                         }
 
-                        let buyer_name = self
-                            .buyer_manager
-                            .get(&campaign.company_id)
-                            .map(|b| b.buyer_name.clone())
-                            .unwrap_or_else(|| {
-                                warn!(
-                                    buyer_id = %campaign.company_id,
-                                    "Buyer not found for campaign counters"
-                                );
-                                campaign.company_id.clone()
-                            });
-
                         let advertiser_name = self
                             .advertiser_manager
                             .get(&campaign.advertiser_id)
@@ -105,8 +91,8 @@ impl CampaignCountersTask {
                             .unwrap_or_default();
 
                         self.store.merge(
-                            &campaign.company_id,
-                            &buyer_name,
+                            &campaign.buyer_id,
+                            buyer_name,
                             &campaign.id,
                             &campaign.name,
                             &publisher.id,

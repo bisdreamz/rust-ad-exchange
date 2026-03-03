@@ -21,14 +21,11 @@ impl Provider<Advertiser> for ConfigAdvertiserProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<Advertiser>) + Send + Sync>,
     ) -> Result<Vec<Advertiser>, Error> {
-        self.config_manager
+        Ok(self
+            .config_manager
             .get()
             .advertisers
             .clone()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "advertisers must be defined in config when Firestore is not configured"
-                )
-            })
+            .unwrap_or_default())
     }
 }

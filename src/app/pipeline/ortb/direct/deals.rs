@@ -2,6 +2,7 @@ use crate::core::models::campaign::Campaign;
 use crate::core::models::deal::Deal;
 use ahash::AHashMap;
 use std::sync::Arc;
+use tracing::trace;
 
 /// Resolves which deal applies for a winning campaign.
 /// If the campaign targets multiple deals and more than one matched,
@@ -15,21 +16,28 @@ pub fn resolve(
         return None;
     }
 
-    let deals = deal_map.get(&campaign.company_id)?;
+    let deals = deal_map.get(&campaign.buyer_id)?;
 
-    campaign
+    let result = campaign
         .targeting
         .deal_ids
         .iter()
         .find_map(|did| deals.iter().find(|d| d.id == *did))
-        .cloned()
+        .cloned();
+
+    match &result {
+        Some(deal) => trace!(campaign = %campaign.id, deal = %deal.id, "Deal resolved"),
+        None => trace!(campaign = %campaign.id, "No matching deal found"),
+    }
+
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::models::campaign::{
-        Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
+        BudgetType, Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
     };
     use crate::core::models::common::Status;
     use crate::core::models::deal::{Deal, DealOwner, DealPricing, DealTargeting, DemandPolicy};
@@ -39,13 +47,14 @@ mod tests {
     fn stub_campaign(deal_ids: Vec<String>) -> Campaign {
         Campaign {
             status: Status::Active,
-            company_id: "co1".into(),
+            buyer_id: "co1".into(),
             id: "c1".into(),
             start_date: Utc::now() - chrono::Duration::hours(1),
             end_date: Utc::now() + chrono::Duration::hours(1),
             name: "test".into(),
             pacing: CampaignPacing::Fast,
             budget: 1000.0,
+            budget_type: BudgetType::Total,
             strategy: PricingStrategy::FixedPrice(5.0),
             advertiser_id: "adv1".into(),
             targeting: CampaignTargeting {
@@ -61,7 +70,7 @@ mod tests {
             id: id.into(),
             name: "test deal".into(),
             policy: DemandPolicy::Direct {
-                company_ids: vec!["co1".into()],
+                buyer_ids: vec!["co1".into()],
             },
             owner: DealOwner::Platform,
             pricing: DealPricing::Inherit,

@@ -22,15 +22,25 @@ impl CacheNoticeUrlsValidationTask {
 
 impl BlockingTask<BillingEventContext, Error> for CacheNoticeUrlsValidationTask {
     fn run(&self, context: &BillingEventContext) -> Result<(), Error> {
-        let _span = child_span_info!("cache_notice_urls_validation_task").entered();
+        let span = child_span_info!(
+            "cache_notice_urls_validation_task",
+            bid_event_id = tracing::field::Empty,
+            result = tracing::field::Empty,
+            is_direct = tracing::field::Empty,
+        );
 
         let billing_event = context
             .details
             .get()
             .ok_or_else(|| anyhow!("No details on billing context!"))?;
 
+        span.record("bid_event_id", billing_event.bid_event_id.as_str());
+
         match self.cache.get(&billing_event.bid_event_id) {
             Some(notice) => {
+                span.record("result", "found");
+                span.record("is_direct", notice.direct.is_some());
+
                 debug!(
                     "Received valid billing event id {}",
                     billing_event.bid_event_id
@@ -42,6 +52,8 @@ impl BlockingTask<BillingEventContext, Error> for CacheNoticeUrlsValidationTask 
                     .map_err(|_| anyhow!("bid_notice already set on context?!"))?;
             }
             None => {
+                span.record("result", "expired_or_duplicate");
+
                 debug!(
                     "Received expired or duplicate billing event id {}",
                     billing_event.bid_event_id

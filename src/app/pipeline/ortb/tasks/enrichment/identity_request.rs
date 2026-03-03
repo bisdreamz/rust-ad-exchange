@@ -82,10 +82,7 @@ impl LocalIdentityTask {
             return Ok(());
         }
 
-        let publisher = context
-            .publisher
-            .get()
-            .ok_or_else(|| anyhow!("No publisher found in context!"))?;
+        let publisher = &context.publisher;
 
         let mut attrs = vec![
             KeyValue::new("pub_id", publisher.id.clone()),

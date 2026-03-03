@@ -2,7 +2,7 @@ mod advertisers;
 mod buyers;
 mod campaigns;
 mod creatives;
-mod deals;
+pub mod deals;
 mod demand;
 mod publishers;
 mod shapers;

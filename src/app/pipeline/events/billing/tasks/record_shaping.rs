@@ -3,8 +3,9 @@ use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::core::managers::ShaperManager;
 use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
+use rtb::child_span_info;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::warn;
 
 pub struct RecordShapingEventsTask {
     shaper_manager: Arc<ShaperManager>,
@@ -18,6 +19,20 @@ impl RecordShapingEventsTask {
 
 impl BlockingTask<BillingEventContext, Error> for RecordShapingEventsTask {
     fn run(&self, context: &BillingEventContext) -> Result<(), Error> {
+        let span = child_span_info!(
+            "record_shaping_events_task",
+            result = tracing::field::Empty,
+            shaping_key = tracing::field::Empty,
+        );
+
+        // shaping only applies to rtb bids
+        if let Some(notice) = context.bid_notice.get() {
+            if notice.direct.is_some() {
+                span.record("result", "skipped_direct");
+                return Ok(());
+            }
+        }
+
         let billing_url = context
             .data_url
             .get()
@@ -35,12 +50,12 @@ impl BlockingTask<BillingEventContext, Error> for RecordShapingEventsTask {
         let shaping_key = match shaping_key_opt {
             Some(shaping_key) => shaping_key,
             None => {
-                debug!("No shaping key for bid event, skipping shaping training");
+                span.record("result", "missing_sk");
                 return Ok(());
             }
         };
 
-        debug!("Attempting to record shaping key: {shaping_key:?}");
+        span.record("shaping_key", shaping_key.as_str());
 
         let shaper = match self
             .shaper_manager
@@ -48,7 +63,7 @@ impl BlockingTask<BillingEventContext, Error> for RecordShapingEventsTask {
         {
             Some(shaper) => shaper,
             None => {
-                // likely, it was enabled but recently disabled
+                span.record("result", "no_shaper");
                 warn!("Have shaping key but no shaper found while recording billing event!");
                 return Ok(());
             }
@@ -62,10 +77,7 @@ impl BlockingTask<BillingEventContext, Error> for RecordShapingEventsTask {
             )
             .map_err(|e| anyhow!("Failed to record billing event on shaper: {}", e))?;
 
-        debug!(
-            "Successfully recorded impression on traffic shaper for bidder {} endpoint {}",
-            billing_event.bidder_id, billing_event.endpoint_id
-        );
+        span.record("result", "success");
 
         Ok(())
     }

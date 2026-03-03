@@ -4,13 +4,12 @@ use crate::core::cluster::ClusterDiscovery;
 use crate::core::managers::{DemandChange, DemandManager};
 use crate::core::models::bidder::Endpoint;
 use crate::core::spec::nobidreasons;
-use anyhow::{Error, anyhow, bail};
+use anyhow::{Error, bail};
 use async_trait::async_trait;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use parking_lot::RwLock;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
-use rtb::common::bidresponsestate::BidResponseState;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -72,8 +71,8 @@ impl QpslimiterTask {
                         if !ep.enabled {
                             continue;
                         }
-                        debug!("Adding QPS limiter for new endpoint {}", ep.name);
-                        map.insert(ep.name.clone(), create_limiter(ep, cluster_sz));
+                        debug!("Adding QPS limiter for endpoint {}", ep.name);
+                        map.insert(ep.stable_id().to_string(), create_limiter(ep, cluster_sz));
                     }
                 }
                 DemandChange::Modified {
@@ -81,27 +80,14 @@ impl QpslimiterTask {
                     prev_endpoints,
                     ..
                 } => {
+                    // Remove all previous entries, then insert current —
+                    // handles renames, additions, and removals in one sweep
                     for prev_ep in prev_endpoints {
-                        if !new_eps.iter().any(|e| e.name == prev_ep.name && e.enabled) {
-                            debug!("Removing QPS limiter for endpoint {}", prev_ep.name);
-                            map.remove(&prev_ep.name);
-                        }
+                        map.remove(prev_ep.stable_id());
                     }
                     for ep in new_eps {
-                        if !ep.enabled {
-                            map.remove(&ep.name);
-                            continue;
-                        }
-                        let prev_qps = prev_endpoints
-                            .iter()
-                            .find(|p| p.name == ep.name)
-                            .map(|p| p.qps);
-                        if prev_qps != Some(ep.qps) || !map.contains_key(&ep.name) {
-                            debug!(
-                                "Endpoint {} QPS {:?} -> {}, recreating limiter",
-                                ep.name, prev_qps, ep.qps
-                            );
-                            map.insert(ep.name.clone(), create_limiter(ep, cluster_sz));
+                        if ep.enabled {
+                            map.insert(ep.stable_id().to_string(), create_limiter(ep, cluster_sz));
                         }
                     }
                 }
@@ -114,7 +100,7 @@ impl QpslimiterTask {
                             "Bidder {} deleted, removing QPS limiter for endpoint {}",
                             bidder_id, ep.name
                         );
-                        map.remove(&ep.name);
+                        map.remove(ep.stable_id());
                     }
                 }
             }
@@ -145,8 +131,10 @@ impl QpslimiterTask {
                     if !endpoint.enabled {
                         continue;
                     }
-                    endpoints_limiters
-                        .insert(endpoint.name.clone(), create_limiter(endpoint, cluster_sz));
+                    endpoints_limiters.insert(
+                        endpoint.stable_id().to_string(),
+                        create_limiter(endpoint, cluster_sz),
+                    );
                 }
             });
 
@@ -163,7 +151,7 @@ impl QpslimiterTask {
 
         let endpoints = self.endpoints.read();
 
-        let rl_opt = match endpoints.get(&callout.endpoint.name) {
+        let rl_opt = match endpoints.get(callout.endpoint.stable_id()) {
             Some(rl_opt) => rl_opt,
             None => {
                 warn!(
@@ -257,18 +245,10 @@ impl QpslimiterTask {
         span.record("callouts_passed", callouts_passed);
 
         if callouts_passed == 0 {
-            let brs = BidResponseState::NoBidReason {
-                reqid: context.original_auction_id.clone(),
-                nbr: nobidreasons::THROTTLED_BUYER_QPS,
-                desc: "Demand QPS Saturated".into(),
-            };
-
-            context
-                .res
-                .set(brs)
-                .map_err(|_| anyhow!("Failed assigning no buyer qps reason on context!"))?;
-
-            bail!("No endpoints survived prior filtering or QPS filtering, bailing");
+            let _ = context
+                .rtb_nbr
+                .set((nobidreasons::THROTTLED_BUYER_QPS, "Demand QPS Saturated"));
+            bail!("No endpoints survived QPS filtering");
         }
 
         Ok(())

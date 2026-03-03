@@ -75,13 +75,19 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
         let imp_delay_millis = timestamp_millis.saturating_sub(event.bid_timestamp);
         let imp_delay = Duration::from_millis(imp_delay_millis);
 
+        let ad_format = context
+            .bid_notice
+            .get()
+            .map(|n| n.format.as_str())
+            .unwrap_or("Unknown");
+
         debug!(
             "Recorded billing event pub {} bidder {} gross price {} cost {} format {} delay {}s",
             event.pub_id,
             event.bidder_id,
             event.cpm_gross,
             event.cpm_cost,
-            event.bid_ad_format,
+            ad_format,
             imp_delay.as_secs()
         );
 
@@ -99,7 +105,7 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
         span.record("pub_id", event.pub_id.clone());
         span.record("bidder_id", event.bidder_id.clone());
         span.record("bidder_endpoint_id", event.endpoint_id.clone());
-        span.record("ad_format", event.bid_ad_format.to_string());
+        span.record("ad_format", ad_format);
         span.record("cpm_gross", event.cpm_gross);
         span.record("cpm_cost", event.cpm_cost);
         span.record("imp_delay_secs", imp_delay.as_secs());
@@ -111,7 +117,7 @@ impl BlockingTask<BillingEventContext, Error> for RecordBillingMetricsTask {
             KeyValue::new("pub_id", event.pub_id.clone()),
             KeyValue::new("bidder_id", event.bidder_id.clone()),
             KeyValue::new("bidder_endpoint_id", event.endpoint_id.clone()),
-            KeyValue::new("ad_format", event.bid_ad_format.to_string()),
+            KeyValue::new("ad_format", ad_format.to_string()),
             KeyValue::new("source", source.clone()),
         ];
 

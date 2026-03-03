@@ -1,6 +1,7 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderContext, BidderResponseState, IdentityContext};
 use crate::core::firestore::counters::publisher::{PublisherCounterStore, PublisherCounters};
+use crate::core::models::creative::CreativeFormat;
 use crate::core::spec::{Channel, StatsDeviceType};
 use anyhow::Error;
 use async_trait::async_trait;
@@ -26,16 +27,16 @@ static COUNTER_REQUEST_BLOCKED: LazyLock<Counter<u64>> = LazyLock::new(|| {
 fn imp_formats(imp: &Imp) -> SmallVec<[&'static str; 4]> {
     let mut formats = SmallVec::new();
     if imp.banner.is_some() {
-        formats.push("banner");
+        formats.push("Banner");
     }
     if imp.video.is_some() {
-        formats.push("video");
+        formats.push("Video");
     }
     if imp.native.is_some() {
-        formats.push("native");
+        formats.push("Native");
     }
     if imp.audio.is_some() {
-        formats.push("audio");
+        formats.push("Audio");
     }
     formats
 }
@@ -144,8 +145,21 @@ fn add_auction_stats(
                                 total_bids_filtered += 1;
                             }
 
-                            if let Some(ad_format) = utils::detect_ad_format(&bid_ctx.bid) {
-                                if let Some(fc) = by_format.get_mut(ad_format.as_str()) {
+                            let format_str = if let Some(direct) = bid_ctx.direct.get() {
+                                Some(direct.creative.format.as_str())
+                            } else {
+                                utils::detect_ad_format(&bid_ctx.bid).map(|af| {
+                                    CreativeFormat::from_rtb(
+                                        af,
+                                        bid_ctx.bid.w as u32,
+                                        bid_ctx.bid.h as u32,
+                                    )
+                                    .as_str()
+                                })
+                            };
+
+                            if let Some(fmt) = format_str {
+                                if let Some(fc) = by_format.get_mut(fmt) {
                                     fc.bid(1);
                                     if filtered {
                                         fc.bids_filtered(1);
@@ -189,11 +203,7 @@ impl PubCountersTask {
     }
 
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
-        let Some(publisher) = context.publisher.get() else {
-            // unrecognized seller, somewhat normal -
-            // dont halt any further finalizer tasks
-            return Ok(());
-        };
+        let publisher = &context.publisher;
 
         let is_blocked = context.block_reason.get().is_some();
 

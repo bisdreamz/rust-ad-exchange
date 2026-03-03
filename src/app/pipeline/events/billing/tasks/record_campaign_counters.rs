@@ -1,43 +1,31 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
-use crate::app::pipeline::ortb::direct::pacing::{DealPacer, SpendTracker};
 use crate::core::firestore::counters::campaign::{CampaignCounterStore, CampaignCounters};
-use crate::core::firestore::counters::deal::{DealCounterStore, DealCounters};
 use crate::core::firestore::counters::publisher::PublisherCounterStore;
-use crate::core::managers::{AdvertiserManager, BuyerManager};
+use crate::core::managers::AdvertiserManager;
 use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
 use std::sync::Arc;
-use tracing::warn;
 
+/// Writes Firestore counter documents for direct campaign billing events.
+/// Pacing state (spend tracking, deal impressions) is handled separately
+/// by `RecordPacingTask` which runs unconditionally before this task.
 pub struct RecordCampaignBillingCountersTask {
     campaign_store: Arc<CampaignCounterStore>,
-    deal_store: Arc<DealCounterStore>,
     pub_store: Arc<PublisherCounterStore>,
-    buyer_manager: Arc<BuyerManager>,
     advertiser_manager: Arc<AdvertiserManager>,
-    spend_tracker: Arc<dyn SpendTracker>,
-    deal_pacer: Arc<dyn DealPacer>,
 }
 
 impl RecordCampaignBillingCountersTask {
     pub fn new(
         campaign_store: Arc<CampaignCounterStore>,
-        deal_store: Arc<DealCounterStore>,
         pub_store: Arc<PublisherCounterStore>,
-        buyer_manager: Arc<BuyerManager>,
         advertiser_manager: Arc<AdvertiserManager>,
-        spend_tracker: Arc<dyn SpendTracker>,
-        deal_pacer: Arc<dyn DealPacer>,
     ) -> Self {
         Self {
             campaign_store,
-            deal_store,
             pub_store,
-            buyer_manager,
             advertiser_manager,
-            spend_tracker,
-            deal_pacer,
         }
     }
 }
@@ -45,6 +33,12 @@ impl RecordCampaignBillingCountersTask {
 impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersTask {
     fn run(&self, context: &BillingEventContext) -> Result<(), Error> {
         let _span = child_span_info!("record_campaign_counters_task").entered();
+
+        // RTB bids have no campaign context — skip campaign counters
+        let notice = context
+            .bid_notice
+            .get()
+            .ok_or_else(|| anyhow!("No bid notice on billing context!"))?;
 
         let details = context
             .details
@@ -57,35 +51,12 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
         let dev_type = details.device_type.to_string();
         let dev_os = details.device_os.to_string();
         let country = &details.country;
-
-        let notice = context
-            .bid_notice
-            .get()
-            .ok_or_else(|| anyhow!("No bid notice on billing context!"))?;
-
-        // Deal impression tracking — applies to both direct and RTB bids
-        if let Some(deal) = &notice.deal {
-            self.deal_pacer.record_impression(&deal.id);
-
-            let mut deal_counters = DealCounters::default();
-            deal_counters.impression();
-            self.deal_store.merge(&deal.id, &deal_counters);
-        }
-
         let deal_id = notice.deal.as_ref().map(|d| d.id.as_str()).unwrap_or("");
 
         if let Some(direct) = &notice.direct {
             let campaign = &direct.campaign;
             let creative = &direct.creative;
-
-            let buyer_name = self
-                .buyer_manager
-                .get(&campaign.company_id)
-                .map(|b| b.buyer_name.clone())
-                .unwrap_or_else(|| {
-                    warn!(buyer_id = %campaign.company_id, "Buyer not found for campaign billing");
-                    campaign.company_id.clone()
-                });
+            let buyer_name = &direct.buyer.buyer_name;
 
             let advertiser_name = self
                 .advertiser_manager
@@ -94,8 +65,8 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
                 .unwrap_or_default();
 
             self.campaign_store.merge(
-                &campaign.company_id,
-                &buyer_name,
+                &campaign.buyer_id,
+                buyer_name,
                 &campaign.id,
                 &campaign.name,
                 &details.pub_id,
@@ -110,14 +81,11 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
                 &counters,
             );
 
-            self.spend_tracker
-                .record_spend(&campaign.id, details.cpm_gross);
-
             self.pub_store.merge_detail(
                 &details.pub_id,
                 &campaign.id,
-                &campaign.company_id,
-                &buyer_name,
+                &campaign.buyer_id,
+                buyer_name,
                 deal_id,
                 &dev_type,
                 &dev_os,
@@ -126,11 +94,12 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
                 &counters,
             );
         } else {
-            // RTB billing — pub detail only, campaign fields empty
+            // RTB bids — no campaign context, but still record pub detail
+            // stats for per-bidder/deal/device/geo breakdown
             self.pub_store.merge_detail(
                 &details.pub_id,
                 "",
-                "",
+                &details.bidder_id,
                 "",
                 deal_id,
                 &dev_type,

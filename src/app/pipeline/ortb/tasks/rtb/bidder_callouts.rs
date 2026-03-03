@@ -222,7 +222,7 @@ fn record_counter_bid_price_metrics(response: &BidderResponse, attrs: &[KeyValue
 }
 
 fn record_counter_metrics(context: &AuctionContext, bidders: &Vec<BidderContext>) {
-    let publisher = context.publisher.get().unwrap();
+    let publisher = &context.publisher;
 
     for bidder_context in bidders {
         for callout in &bidder_context.callouts {

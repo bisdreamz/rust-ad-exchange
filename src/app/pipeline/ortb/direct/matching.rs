@@ -7,7 +7,7 @@ use ahash::AHashMap;
 use chrono::Utc;
 use rtb::bid_request::Imp;
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{Level, debug, enabled, trace, warn};
 
 use super::deals;
 use super::pacing::DealPacer;
@@ -18,17 +18,32 @@ use super::settlement;
 /// campaigns or deal pricing
 const MAX_BID_PRICE: f64 = 100.0;
 
+/// Exponent for price-weighted random selection among candidates.
+///
+/// Controls how aggressively higher prices are favored:
+/// - k=1 (linear): $5 vs $10 → 33%/67%. Too flat.
+/// - k=2 (squared): $5 vs $10 → 20%/80%. Good balance.
+/// - k=3 (cubed): $5 vs $10 → 11%/89%. Very aggressive.
+///
+/// At k=2, nearly equal prices get nearly equal exposure ($9 vs $10 →
+/// 45%/55%), while large gaps strongly favor the higher price ($1 vs $10
+/// → 1%/99%). Revenue impact is modest since selection is proportional
+/// to price². A lone candidate (e.g. PG deal) always wins regardless.
+const PRICE_WEIGHT_EXPONENT: f64 = 2.0;
+
 /// A campaign that passed targeting, deal resolution, and pricing.
-/// Not yet spend-paced or creative-matched — the caller walks
-/// the sorted candidates to find the first that passes both.
+/// Not yet spend-paced or creative-matched — the caller selects
+/// via price-weighted random, then checks pacer and creative.
 pub struct CampaignCandidate {
     pub campaign: Arc<Campaign>,
     pub deal: Option<Arc<Deal>>,
     pub price: f64,
 }
 
-/// Unpaced candidates sorted by price descending.
-/// Caller walks them: creative match → spend pacer → first to pass = winner.
+/// Unpaced candidates with price-weighted random ordering.
+/// Caller draws from them: each draw picks a candidate weighted by
+/// `price^PRICE_WEIGHT_EXPONENT`, then checks creative + pacer.
+/// If a candidate fails, it's removed and the next draw excludes it.
 pub struct MatchResult {
     pub candidates: Vec<CampaignCandidate>,
 }
@@ -41,15 +56,15 @@ pub struct MatchResult {
 ///
 /// Order of operations:
 /// 1. Evaluate direct deals (small set) against imp targeting + deal pacing
-/// 2. Build company_id → matched deals index
+/// 2. Build buyer_id → matched deals index
 /// 3. Single pass over campaigns — targeting, deal resolution,
 ///    price computation checked per candidate. No side effects.
-///    DealsOnly skips the full scan and only checks deal-company campaigns.
+///    DealsOnly skips the full scan and only checks deal-buyer campaigns.
 /// 4. Sort candidates by price descending
 pub fn match_imp(
     direct_deals: &[Arc<Deal>],
     all_campaigns: &[Arc<Campaign>],
-    campaigns_by_company: &dyn Fn(&str) -> Vec<Arc<Campaign>>,
+    campaigns_by_buyer: &dyn Fn(&str) -> Vec<Arc<Campaign>>,
     fill_policy: &FillPolicy,
     deal_pacer: &dyn DealPacer,
     ctx: &AuctionContext,
@@ -59,25 +74,66 @@ pub fn match_imp(
     let deal_map = build_deal_map(direct_deals, deal_pacer, ctx, imp);
 
     let mut candidates = match fill_policy {
-        FillPolicy::DealsOnly => match_deal_only(&deal_map, campaigns_by_company, &now, ctx, imp),
+        FillPolicy::DealsOnly => match_deal_only(&deal_map, campaigns_by_buyer, &now, ctx, imp),
         _ => match_all(all_campaigns, &deal_map, &now, ctx, imp),
     };
 
-    // Shuffle first, then stable-sort by price descending.
-    // Stable sort preserves the random order among equal-price
-    // candidates, so campaigns at the same price rotate across requests.
+    // Shuffle for tie-breaking among equal-weight candidates.
+    // Weighted selection happens at draw time via `draw_weighted`.
     fastrand::shuffle(&mut candidates);
-    candidates.sort_by(|a, b| {
-        b.price
-            .partial_cmp(&a.price)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+
+    if enabled!(Level::DEBUG) {
+        let deal_backed = candidates.iter().filter(|c| c.deal.is_some()).count();
+        debug!(
+            candidates = candidates.len(),
+            deal_backed = deal_backed,
+            open = candidates.len() - deal_backed,
+            deals_matched = deal_map.len(),
+            fill_policy = ?fill_policy,
+            "Imp matching summary"
+        );
+    }
 
     MatchResult { candidates }
 }
 
+/// Pick a candidate from the pool weighted by `price^PRICE_WEIGHT_EXPONENT`.
+/// Returns the index of the selected candidate, or `None` if the pool is empty.
+///
+/// Uses a single random draw across cumulative weights. O(n) per draw,
+/// which is fine — candidate pools are small (typically <20).
+pub fn draw_weighted(candidates: &[CampaignCandidate]) -> Option<usize> {
+    if candidates.is_empty() {
+        return None;
+    }
+    if candidates.len() == 1 {
+        return Some(0);
+    }
+
+    let total: f64 = candidates
+        .iter()
+        .map(|c| c.price.powf(PRICE_WEIGHT_EXPONENT))
+        .sum();
+
+    if total <= 0.0 {
+        return Some(fastrand::usize(..candidates.len()));
+    }
+
+    let roll = fastrand::f64() * total;
+    let mut cumulative = 0.0;
+    for (i, c) in candidates.iter().enumerate() {
+        cumulative += c.price.powf(PRICE_WEIGHT_EXPONENT);
+        if roll < cumulative {
+            return Some(i);
+        }
+    }
+
+    // Floating-point edge case — return last
+    Some(candidates.len() - 1)
+}
+
 /// Evaluates direct deals against imp targeting, returns a map of
-/// company_id → matched deals for downstream resolution
+/// buyer_id → matched deals for downstream resolution
 fn build_deal_map(
     deals: &[Arc<Deal>],
     deal_pacer: &dyn DealPacer,
@@ -88,21 +144,25 @@ fn build_deal_map(
 
     for deal in deals {
         if !matches_targeting(&deal.targeting.common, ctx, imp) {
+            trace!(deal = %deal.id, "Deal didn't pass targeting");
             continue;
         }
 
         if !deal_pacer.passes(deal) {
-            continue; // deal exhausted or rate-limited
+            trace!(deal = %deal.id, "Deal didn't pass impression pacing");
+            continue;
         }
 
-        let company_ids = match &deal.policy {
-            DemandPolicy::Direct { company_ids } => company_ids,
+        let buyer_ids = match &deal.policy {
+            DemandPolicy::Direct { buyer_ids } => buyer_ids,
             _ => continue,
         };
 
-        for company_id in company_ids {
+        trace!(deal = %deal.id, buyers = buyer_ids.len(), "Deal matched");
+
+        for buyer_id in buyer_ids {
             deal_map
-                .entry(company_id.clone())
+                .entry(buyer_id.clone())
                 .or_default()
                 .push(Arc::clone(deal));
         }
@@ -115,15 +175,15 @@ fn build_deal_map(
 /// with matched deals whose deal_ids reference a matched deal.
 fn match_deal_only(
     deal_map: &AHashMap<String, Vec<Arc<Deal>>>,
-    campaigns_by_company: &dyn Fn(&str) -> Vec<Arc<Campaign>>,
+    campaigns_by_buyer: &dyn Fn(&str) -> Vec<Arc<Campaign>>,
     now: &chrono::DateTime<Utc>,
     ctx: &AuctionContext,
     imp: &Imp,
 ) -> Vec<CampaignCandidate> {
     let mut candidates = Vec::new();
 
-    for (company_id, matched_deals) in deal_map {
-        for campaign in campaigns_by_company(company_id) {
+    for (buyer_id, matched_deals) in deal_map {
+        for campaign in campaigns_by_buyer(buyer_id) {
             if !has_matching_deal_id(&campaign, matched_deals) {
                 continue;
             }
@@ -152,7 +212,7 @@ fn match_all(
 
     for campaign in all_campaigns {
         if !campaign.targeting.deal_ids.is_empty() {
-            let Some(deals) = deal_map.get(&campaign.company_id) else {
+            let Some(deals) = deal_map.get(&campaign.buyer_id) else {
                 continue;
             };
 
@@ -193,6 +253,13 @@ fn evaluate_campaign(
         return None;
     }
 
+    trace!(
+        campaign = %campaign.id,
+        price = price,
+        deal = deal.as_ref().map(|d| d.id.as_str()).unwrap_or("none"),
+        "Campaign eligible"
+    );
+
     Some(CampaignCandidate {
         campaign,
         deal,
@@ -216,21 +283,33 @@ fn is_campaign_eligible(
     ctx: &AuctionContext,
     imp: &Imp,
 ) -> bool {
-    *now >= campaign.start_date
-        && *now <= campaign.end_date
-        && matches_targeting(&campaign.targeting.common, ctx, imp)
+    if *now < campaign.start_date || *now > campaign.end_date {
+        trace!(
+            campaign = %campaign.id,
+            start = %campaign.start_date,
+            end = %campaign.end_date,
+            "Campaign outside flight dates"
+        );
+        return false;
+    }
+
+    if !matches_targeting(&campaign.targeting.common, ctx, imp) {
+        trace!(campaign = %campaign.id, "Campaign didn't pass targeting");
+        return false;
+    }
+
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::models::campaign::{
-        Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
+        BudgetType, Campaign, CampaignPacing, CampaignTargeting, PricingStrategy,
     };
     use crate::core::models::common::Status;
     use crate::core::models::deal::{Deal, DealOwner, DealPricing, DealTargeting, DemandPolicy};
     use crate::core::models::targeting::CommonTargeting;
-    use parking_lot::RwLock;
     use rtb::BidRequestBuilder;
     use rtb::bid_request::ImpBuilder;
 
@@ -255,13 +334,14 @@ mod tests {
     fn stub_campaign_open(id: &str, price: f64) -> Campaign {
         Campaign {
             status: Status::Active,
-            company_id: "co1".into(),
+            buyer_id: "co1".into(),
             id: id.into(),
             start_date: Utc::now() - chrono::Duration::hours(1),
             end_date: Utc::now() + chrono::Duration::hours(1),
             name: format!("campaign_{id}"),
             pacing: CampaignPacing::Fast,
             budget: 1000.0,
+            budget_type: BudgetType::Total,
             strategy: PricingStrategy::FixedPrice(price),
             advertiser_id: format!("adv_{id}"),
             targeting: CampaignTargeting::default(),
@@ -284,7 +364,7 @@ mod tests {
             id: id.into(),
             name: format!("deal_{id}"),
             policy: DemandPolicy::Direct {
-                company_ids: vec!["co1".into()],
+                buyer_ids: vec!["co1".into()],
             },
             owner: DealOwner::Platform,
             pricing,
@@ -310,11 +390,9 @@ mod tests {
             ])
             .build()
             .unwrap();
-        AuctionContext {
-            pubid: "pub1".into(),
-            req: RwLock::new(req),
-            ..Default::default()
-        }
+        let mut ctx = AuctionContext::test_default("pub1");
+        *ctx.req.get_mut() = req;
+        ctx
     }
 
     fn default_imp() -> Imp {
@@ -324,7 +402,7 @@ mod tests {
             .unwrap()
     }
 
-    fn noop_by_company(_company_id: &str) -> Vec<Arc<Campaign>> {
+    fn noop_by_buyer(_buyer_id: &str) -> Vec<Arc<Campaign>> {
         vec![]
     }
 
@@ -335,7 +413,7 @@ mod tests {
         let result = match_imp(
             &[],
             &[],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
@@ -352,7 +430,7 @@ mod tests {
         let result = match_imp(
             &[],
             &[c],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
@@ -372,7 +450,7 @@ mod tests {
         let result = match_imp(
             &[deal],
             &[c],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
@@ -393,7 +471,7 @@ mod tests {
         let result = match_imp(
             &[deal],
             &[c],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
@@ -409,14 +487,14 @@ mod tests {
         let deal_backed = Arc::new(stub_campaign_deal("c_deal", 5.0, vec!["d1".into()]));
 
         let all_campaigns = vec![open, deal_backed.clone()];
-        let by_company = |_company_id: &str| -> Vec<Arc<Campaign>> { vec![deal_backed.clone()] };
+        let by_buyer = |_buyer_id: &str| -> Vec<Arc<Campaign>> { vec![deal_backed.clone()] };
         let ctx = default_ctx();
         let imp = default_imp();
 
         let result = match_imp(
             &[deal],
             &all_campaigns,
-            &by_company,
+            &by_buyer,
             &FillPolicy::DealsOnly,
             &AllPassDealPacer,
             &ctx,
@@ -438,7 +516,7 @@ mod tests {
         let result = match_imp(
             &[deal],
             &[open, deal_backed],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::DirectOnly,
             &AllPassDealPacer,
             &ctx,
@@ -458,7 +536,7 @@ mod tests {
         let result = match_imp(
             &[deal],
             &[open, deal_backed],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::DirectAndRtbDeals,
             &AllPassDealPacer,
             &ctx,
@@ -477,7 +555,7 @@ mod tests {
         let result = match_imp(
             &[deal],
             &[c],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &RejectDealPacer,
             &ctx,
@@ -500,7 +578,7 @@ mod tests {
         let result = match_imp(
             &[],
             &[c],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
@@ -510,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn sorted_by_price_desc() {
+    fn all_eligible_become_candidates() {
         let c_low = Arc::new(stub_campaign_open("c_low", 2.0));
         let c_high = Arc::new(stub_campaign_open("c_high", 9.0));
         let c_mid = Arc::new(stub_campaign_open("c_mid", 5.0));
@@ -520,16 +598,13 @@ mod tests {
         let result = match_imp(
             &[],
             &[c_low, c_high, c_mid],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
             &imp,
         );
         assert_eq!(result.candidates.len(), 3);
-        assert!((result.candidates[0].price - 9.0).abs() < 0.01);
-        assert!((result.candidates[1].price - 5.0).abs() < 0.01);
-        assert!((result.candidates[2].price - 2.0).abs() < 0.01);
     }
 
     #[test]
@@ -541,12 +616,99 @@ mod tests {
         let result = match_imp(
             &[],
             &[c],
-            &noop_by_company,
+            &noop_by_buyer,
             &FillPolicy::HighestPrice,
             &AllPassDealPacer,
             &ctx,
             &imp,
         );
         assert!(result.candidates.is_empty());
+    }
+
+    // ---- draw_weighted tests ----
+
+    #[test]
+    fn draw_weighted_empty_returns_none() {
+        assert!(draw_weighted(&[]).is_none());
+    }
+
+    #[test]
+    fn draw_weighted_single_always_returns_zero() {
+        let candidates = vec![CampaignCandidate {
+            campaign: Arc::new(stub_campaign_open("c1", 5.0)),
+            deal: None,
+            price: 5.0,
+        }];
+        for _ in 0..100 {
+            assert_eq!(draw_weighted(&candidates), Some(0));
+        }
+    }
+
+    /// Over many draws, the $10 candidate should win ~80% (weight 100)
+    /// vs the $5 candidate at ~20% (weight 25). With k=2: 100/(100+25) = 80%.
+    #[test]
+    fn draw_weighted_favors_higher_price() {
+        let candidates = vec![
+            CampaignCandidate {
+                campaign: Arc::new(stub_campaign_open("c_high", 10.0)),
+                deal: None,
+                price: 10.0,
+            },
+            CampaignCandidate {
+                campaign: Arc::new(stub_campaign_open("c_low", 5.0)),
+                deal: None,
+                price: 5.0,
+            },
+        ];
+
+        let mut high_wins = 0u32;
+        let rounds = 10_000;
+        for _ in 0..rounds {
+            if draw_weighted(&candidates) == Some(0) {
+                high_wins += 1;
+            }
+        }
+
+        let high_pct = high_wins as f64 / rounds as f64;
+        // Expected ~80% (100/125). Allow ±5% for randomness.
+        assert!(
+            high_pct > 0.74 && high_pct < 0.86,
+            "$10 should win ~80% of draws, got {:.1}%",
+            high_pct * 100.0,
+        );
+    }
+
+    /// Near-equal prices should produce near-equal selection rates.
+    /// $9 vs $10: weights 81 vs 100 → 55%/45%.
+    #[test]
+    fn draw_weighted_near_equal_prices() {
+        let candidates = vec![
+            CampaignCandidate {
+                campaign: Arc::new(stub_campaign_open("c10", 10.0)),
+                deal: None,
+                price: 10.0,
+            },
+            CampaignCandidate {
+                campaign: Arc::new(stub_campaign_open("c9", 9.0)),
+                deal: None,
+                price: 9.0,
+            },
+        ];
+
+        let mut c10_wins = 0u32;
+        let rounds = 10_000;
+        for _ in 0..rounds {
+            if draw_weighted(&candidates) == Some(0) {
+                c10_wins += 1;
+            }
+        }
+
+        let pct = c10_wins as f64 / rounds as f64;
+        // Expected ~55% (100/181). Allow ±5%.
+        assert!(
+            pct > 0.49 && pct < 0.61,
+            "$10 vs $9 should be ~55%/45%, got {:.1}%",
+            pct * 100.0,
+        );
     }
 }

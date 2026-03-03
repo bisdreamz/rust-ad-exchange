@@ -5,11 +5,11 @@ use crate::core::shaping::tree::handler::{
     RtbPredictionHandler, RtbPredictionOutput, RtbTrainingInput,
 };
 use crate::core::shaping::{tree, utils};
-use anyhow::{anyhow, bail, format_err, Error};
+use anyhow::{Error, anyhow, bail, format_err};
 use arc_swap::ArcSwap;
 use logictree::{Feature, LogicTree};
-use rtb::bid_response::Bid;
 use rtb::BidRequest;
+use rtb::bid_response::Bid;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString};
@@ -159,8 +159,11 @@ impl TreeShaper {
         let arc_metric = Arc::new(ArcSwap::from_pointee(metric.clone()));
 
         let str_features = features.iter().map(|f| f.to_string()).collect();
-        let first_pred_handler =
-            RtbPredictionHandler::new(min_decision_auctions, segment_ttl.as_secs() as u32, arc_metric.clone());
+        let first_pred_handler = RtbPredictionHandler::new(
+            min_decision_auctions,
+            segment_ttl.as_secs() as u32,
+            arc_metric.clone(),
+        );
 
         let tree = Arc::new(LogicTree::new(str_features, first_pred_handler));
         let state = Arc::new(ArcSwap::new(Arc::new(ThresholdState::default())));
@@ -188,11 +191,10 @@ impl TreeShaper {
                     let cfg = config.load();
                     let local_qps = local_qps_limit(cfg.qps_limit, cluster.cluster_size());
                     let avail_qps = state.load().qps_avail;
-                    let effective_avail_qps = tree::utils::calc_effective_avail_pool(local_qps, avail_qps);
-                    let passing_qps_budget = tree::utils::qps_budget_passing(
-                        cfg.explore_percent,
-                        effective_avail_qps,
-                    );
+                    let effective_avail_qps =
+                        tree::utils::calc_effective_avail_pool(local_qps, avail_qps);
+                    let passing_qps_budget =
+                        tree::utils::qps_budget_passing(cfg.explore_percent, effective_avail_qps);
 
                     if passing_qps_budget == 0 && avail_qps > 0 {
                         warn!(
@@ -242,8 +244,10 @@ impl TreeShaper {
     ) {
         let old_metric = self.handler_metric.load_full();
         if old_metric.as_ref() != &metric {
-            info!("Updating metric from {} to {} for endpoint",
-                old_metric, metric);
+            info!(
+                "Updating metric from {} to {} for endpoint",
+                old_metric, metric
+            );
             self.handler_metric.store(Arc::new(metric.clone()));
         }
 
@@ -282,7 +286,8 @@ impl TreeShaper {
         // evaluations for (avail - passing - exploratory). Pool
         // starts at the letter of the local QPS limit or the actual
         // available qps if less than endpoint limit
-        let avail_qps_pool = tree::utils::calc_effective_avail_pool(local_qps_limit, state.qps_avail);
+        let avail_qps_pool =
+            tree::utils::calc_effective_avail_pool(local_qps_limit, state.qps_avail);
 
         let prediction = match prediction_opt {
             Some(prediction) => prediction,
@@ -342,7 +347,7 @@ impl TreeShaper {
 
         let qps_exploratory = tree::utils::qps_budget_exploratory(
             cfg.explore_percent,
-            avail_qps_pool // must be entire available pool
+            avail_qps_pool, // must be entire available pool
         );
 
         if tree::utils::qps_passes_percentage(qps_exploratory, avail_qps_pool) {
@@ -480,8 +485,11 @@ impl TreeShaper {
             )
             .map_err(|e| anyhow!("Failed recording tree impression: {}", e))?;
 
-        match self.tree.predict(&features)
-            .map_err(|e| anyhow!("Failed debug predict on tree impression: {}", e))? {
+        match self
+            .tree
+            .predict(&features)
+            .map_err(|e| anyhow!("Failed debug predict on tree impression: {}", e))?
+        {
             Some(prediction) => {
                 info!(
                     "Pred result after imp train:: {:?}\t Prediction: {:?} rev gross {}",
@@ -489,8 +497,10 @@ impl TreeShaper {
                 );
             }
             None => {
-                warn!("No pred result yet after train, features: {:?} cpm gross {}",
-                    features, cpm_gross);
+                warn!(
+                    "No pred result yet after train, features: {:?} cpm gross {}",
+                    features, cpm_gross
+                );
             }
         }
 

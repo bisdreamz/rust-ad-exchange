@@ -3,18 +3,22 @@ use crate::app::pipeline::ortb::context::{
     BidderResponseState, DirectCampaignContext, SeatBidContext,
 };
 use crate::core::models::bidder::Bidder;
+use crate::core::models::buyer::Buyer;
 use crate::core::models::campaign::Campaign;
 use crate::core::models::creative::Creative;
 use crate::core::models::deal::Deal;
+use rtb::BidResponse;
 use rtb::bid_response::bid::AdmOneof;
 use rtb::bid_response::{Bid, SeatBid};
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Synthesizes a BidContext from a direct campaign win.
 /// Sets the DirectCampaignContext so downstream tasks
 /// can distinguish source and access campaign/creative details.
 pub fn synthesize_bid(
+    buyer: &Arc<Buyer>,
     campaign: &Arc<Campaign>,
     creative: &Arc<Creative>,
     deal: Option<Arc<Deal>>,
@@ -33,6 +37,7 @@ pub fn synthesize_bid(
     let bid_ctx = BidContext::from(bid);
 
     let _ = bid_ctx.direct.set(DirectCampaignContext {
+        buyer: Arc::clone(buyer),
         campaign: Arc::clone(campaign),
         creative: Arc::clone(creative),
     });
@@ -44,40 +49,47 @@ pub fn synthesize_bid(
     bid_ctx
 }
 
-/// Wraps a direct bid into the BidderContext structure expected
-/// by ctx.bidders. Uses a synthetic "direct" bidder with a
-/// pre-populated response so BidderCalloutsTask skips it.
+/// Wraps a single direct campaign BidContext into a full BidderContext
+/// with a synthetic "direct" Bidder, so it flows through shared bid
+/// tasks (margin, notice URLs, settlement) uniformly with RTB bids.
 pub fn wrap_in_bidder_context(bid_ctx: BidContext) -> BidderContext {
-    let seatbid_ctx = SeatBidContext {
+    let buyer_id = bid_ctx
+        .direct
+        .get()
+        .map(|d| d.buyer.id.as_str())
+        .unwrap_or("unknown");
+
+    let seat = format!("direct:{buyer_id}");
+
+    let synthetic_bidder = Arc::new(Bidder {
+        id: seat.clone(),
+        name: "direct".to_string(),
+        ..Default::default()
+    });
+
+    let seat_ctx = SeatBidContext {
         seat: SeatBid {
-            seat: "direct".to_string(),
+            seat,
             ..Default::default()
         },
         bids: vec![bid_ctx],
     };
 
     let response_ctx = BidResponseContext {
-        response: Default::default(),
-        seatbids: vec![seatbid_ctx],
-    };
-
-    let response = BidderResponse {
-        state: BidderResponseState::Bid(response_ctx),
-        ..Default::default()
+        response: BidResponse::default(),
+        seatbids: vec![seat_ctx],
     };
 
     let callout = BidderCallout {
-        endpoint: Arc::new(Default::default()),
-        req: Default::default(),
+        response: std::sync::OnceLock::from(BidderResponse {
+            state: BidderResponseState::Bid(response_ctx),
+            latency: Duration::ZERO,
+        }),
         ..Default::default()
     };
-    let _ = callout.response.set(response);
 
     BidderContext {
-        bidder: Arc::new(Bidder {
-            id: "direct".to_string(),
-            ..Default::default()
-        }),
+        bidder: synthetic_bidder,
         callouts: vec![callout],
     }
 }

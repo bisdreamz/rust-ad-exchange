@@ -1,0 +1,250 @@
+logging:
+  level: trace
+  span_sample_rate: 0.1
+  sinks:
+    - type: stdout
+
+ssl:
+  selfsigned:
+    hosts:
+      - localhost
+
+notifications:
+  ttl: 30m
+  domain: localhost
+  billing_path: /billing
+
+schain_limit: 4
+
+publishers:
+  - id: test_pub
+    domain: testpub.local
+    seller_type: Publisher
+    enabled: true
+    name: Test Publisher
+    margin: 15
+
+bidders:
+  - bidder:
+      id: test_bidder
+      name: Test Bidder
+    endpoints:
+      - id: east_ep
+        enabled: true
+        name: East Endpoint
+        url: http://localhost:8080/bid
+        qps: 10
+        shaping: { type: none }
+        targeting: {}
+
+buyers:
+  - id: test_buyer
+    buyer_name: Test Buyer
+    status: Active
+
+advertisers:
+  - id: adv_alpha
+    buyer_id: test_buyer
+    brand: Alpha Brand
+    domain: alphabrand.com
+  - id: adv_beta
+    buyer_id: test_buyer
+    brand: Beta Brand
+    domain: betabrand.com
+
+campaigns:
+  - id: camp_1
+    status: Active
+    buyer_id: test_buyer
+    name: Dollar Campaign
+    advertiser_id: adv_alpha
+    budget: 100.0
+    budget_type: Daily
+    pacing: Fast
+    strategy:
+      FixedPrice: 1.0
+    start_date: "2026-02-27T00:00:00Z"
+    end_date: "2026-03-06T23:59:59Z"
+    targeting:
+      common:
+        geos_filter: { type: Any }
+        dev_os_filter: { type: Any }
+        dev_type_filter: { type: Any }
+        pub_id_filter: { type: Any }
+        bundle_domain_filter: { type: Any }
+        placement_id_filter: { type: Any }
+        allowed_property_types: Any
+      deal_ids: []
+
+  - id: camp_2
+    status: Active
+    buyer_id: test_buyer
+    name: Two Dollar Campaign
+    advertiser_id: adv_alpha
+    budget: 200.0
+    budget_type: Daily
+    pacing: Fast
+    strategy:
+      FixedPrice: 2.0
+    start_date: "2026-02-27T00:00:00Z"
+    end_date: "2026-03-06T23:59:59Z"
+    targeting:
+      common:
+        geos_filter: { type: Any }
+        dev_os_filter: { type: Any }
+        dev_type_filter: { type: Any }
+        pub_id_filter: { type: Any }
+        bundle_domain_filter: { type: Any }
+        placement_id_filter: { type: Any }
+        allowed_property_types: Any
+      deal_ids: []
+
+  - id: camp_3
+    status: Active
+    buyer_id: test_buyer
+    name: Three Dollar Campaign
+    advertiser_id: adv_beta
+    budget: 300.0
+    budget_type: Daily
+    pacing: Even
+    strategy:
+      FixedPrice: 3.0
+    start_date: "2026-02-27T00:00:00Z"
+    end_date: "2026-03-06T23:59:59Z"
+    targeting:
+      common:
+        geos_filter: { type: Any }
+        dev_os_filter: { type: Any }
+        dev_type_filter: { type: Any }
+        pub_id_filter: { type: Any }
+        bundle_domain_filter: { type: Any }
+        placement_id_filter: { type: Any }
+        allowed_property_types: Any
+      deal_ids: []
+
+  - id: camp_4
+    status: Active
+    buyer_id: test_buyer
+    name: Four Dollar Campaign
+    advertiser_id: adv_beta
+    budget: 400.0
+    budget_type: Daily
+    pacing: Even
+    strategy:
+      FixedPrice: 4.0
+    start_date: "2026-02-27T00:00:00Z"
+    end_date: "2026-03-06T23:59:59Z"
+    targeting:
+      common:
+        geos_filter: { type: Any }
+        dev_os_filter: { type: Any }
+        dev_type_filter: { type: Any }
+        pub_id_filter: { type: Any }
+        bundle_domain_filter: { type: Any }
+        placement_id_filter: { type: Any }
+        allowed_property_types: Any
+      deal_ids: []
+
+  - id: camp_5
+    status: Active
+    buyer_id: test_buyer
+    name: Five Dollar Campaign
+    advertiser_id: adv_alpha
+    budget: 100.0
+    budget_type: Daily
+    pacing: Even
+    strategy:
+      FixedPrice: 5.0
+    start_date: "2026-02-27T00:00:00Z"
+    end_date: "2026-03-06T23:59:59Z"
+    targeting:
+      common:
+        geos_filter: { type: Any }
+        dev_os_filter: { type: Any }
+        dev_type_filter: { type: Any }
+        pub_id_filter: { type: Any }
+        bundle_domain_filter: { type: Any }
+        placement_id_filter: { type: Any }
+        allowed_property_types: Any
+      deal_ids: []
+
+creatives:
+  # camp_1 creatives
+  - id: cr_1a
+    status: Active
+    name: Dollar Banner 300x250
+    campaign_id: camp_1
+    format:
+      Banner: { w: 300, h: 250 }
+    content: "<b>Test Buyer Dollar Campaign - Dollar Banner 300x250</b>"
+  - id: cr_1b
+    status: Active
+    name: Dollar Banner 728x90
+    campaign_id: camp_1
+    format:
+      Banner: { w: 728, h: 90 }
+    content: "<b>Test Buyer Dollar Campaign - Dollar Banner 728x90</b>"
+
+  # camp_2 creatives
+  - id: cr_2a
+    status: Active
+    name: Two Dollar Banner 300x250
+    campaign_id: camp_2
+    format:
+      Banner: { w: 300, h: 250 }
+    content: "<b>Test Buyer Two Dollar Campaign - Two Dollar Banner 300x250</b>"
+  - id: cr_2b
+    status: Active
+    name: Two Dollar Banner 320x50
+    campaign_id: camp_2
+    format:
+      Banner: { w: 320, h: 50 }
+    content: "<b>Test Buyer Two Dollar Campaign - Two Dollar Banner 320x50</b>"
+
+  # camp_3 creatives
+  - id: cr_3a
+    status: Active
+    name: Three Dollar Banner 300x250
+    campaign_id: camp_3
+    format:
+      Banner: { w: 300, h: 250 }
+    content: "<b>Test Buyer Three Dollar Campaign - Three Dollar Banner 300x250</b>"
+  - id: cr_3b
+    status: Active
+    name: Three Dollar Banner 160x600
+    campaign_id: camp_3
+    format:
+      Banner: { w: 160, h: 600 }
+    content: "<b>Test Buyer Three Dollar Campaign - Three Dollar Banner 160x600</b>"
+
+  # camp_4 creatives
+  - id: cr_4a
+    status: Active
+    name: Four Dollar Banner 300x250
+    campaign_id: camp_4
+    format:
+      Banner: { w: 300, h: 250 }
+    content: "<b>Test Buyer Four Dollar Campaign - Four Dollar Banner 300x250</b>"
+  - id: cr_4b
+    status: Active
+    name: Four Dollar Banner 728x90
+    campaign_id: camp_4
+    format:
+      Banner: { w: 728, h: 90 }
+    content: "<b>Test Buyer Four Dollar Campaign - Four Dollar Banner 728x90</b>"
+
+  # camp_5 creatives
+  - id: cr_5a
+    status: Active
+    name: Five Dollar Banner 300x250
+    campaign_id: camp_5
+    format:
+      Banner: { w: 300, h: 250 }
+    content: "<b>Test Buyer Five Dollar Campaign - Five Dollar Banner 300x250</b>"
+  - id: cr_5b
+    status: Active
+    name: Five Dollar Banner 300x600
+    campaign_id: camp_5
+    format:
+      Banner: { w: 300, h: 600 }
+    content: "<b>Test Buyer Five Dollar Campaign - Five Dollar Banner 300x600</b>"

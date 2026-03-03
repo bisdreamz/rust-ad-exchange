@@ -21,8 +21,11 @@ impl Provider<Creative> for ConfigCreativeProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<Creative>) + Send + Sync>,
     ) -> Result<Vec<Creative>, Error> {
-        self.config_manager.get().creatives.clone().ok_or_else(|| {
-            anyhow::anyhow!("creatives must be defined in config when Firestore is not configured")
-        })
+        Ok(self
+            .config_manager
+            .get()
+            .creatives
+            .clone()
+            .unwrap_or_default())
     }
 }

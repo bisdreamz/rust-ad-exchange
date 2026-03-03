@@ -1,7 +1,7 @@
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::context::{BidderCallout, BidderResponseState};
 use crate::core::demand::takerate;
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use async_trait::async_trait;
 use pipeline::AsyncTask;
 use rtb::child_span_info;
@@ -51,10 +51,7 @@ pub struct BidMarginTask;
 
 impl BidMarginTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
-        let publisher = context
-            .publisher
-            .get()
-            .ok_or_else(|| anyhow!("No publisher associated with margin context!"))?;
+        let publisher = &context.publisher;
 
         for bidder_context in context.bidders.lock().await.iter_mut() {
             for callout in bidder_context.callouts.iter_mut() {

@@ -20,7 +20,7 @@ impl BlockingTask<AuctionContext, anyhow::Error> for ValidateRequestTask {
 
         debug!(
             "Validating request for seller {} source {}",
-            context.pubid, context.source
+            context.publisher.id, context.source
         );
 
         let req = context.req.read();

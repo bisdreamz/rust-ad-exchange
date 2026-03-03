@@ -1,25 +1,36 @@
 use crate::app::pipeline::ortb::direct::pacing::SpendTracker;
+use crate::app::pipeline::ortb::direct::pacing::daily_map::{DailyMap, is_bucket_today};
 use crate::core::providers::{Provider, ProviderEvent};
 use ahash::AHashMap;
 use anyhow::Error;
+use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, warn};
 
-const MICROS_PER_DOLLAR: f64 = 1_000_000.0;
+/// Precision multiplier for atomic integer storage.
+/// CPM values are stored as `cpm * MICROS` for u64 atomics.
+const MICROS: f64 = 1_000_000.0;
 
 /// Reads campaign spend from the unbucketed `direct_spend_by_campaign`
 /// collection written by CampaignCounterStore. Uses the standard
 /// FirestoreProvider listener pattern — initial load then real-time
 /// document change events.
 ///
+/// Values are stored and returned as **CPM sums** — the sum of
+/// per-impression CPM rates. Actual dollars = cpm_sum / 1000.
+/// Internally uses CPM-micros (u64) for atomic precision.
+///
 /// Entirely decoupled from CampaignCounterStore — they share the
 /// collection path, nothing else. The counter store writes; this
 /// tracker reads.
 pub struct FirestoreSpendTracker {
+    /// Lifetime (total) spend per campaign — from unbucketed collection
     spend: RwLock<AHashMap<String, u64>>,
+    /// Today's spend per campaign — from daily-bucketed collection
+    daily: DailyMap,
 }
 
 /// Shape of the counter docs written by CampaignCounterStore.
@@ -28,6 +39,11 @@ pub struct FirestoreSpendTracker {
 pub struct SpendDoc {
     pub fields: HashMap<String, String>,
     pub stats: Option<SpendStats>,
+    #[serde(
+        default,
+        deserialize_with = "firestore::serialize_as_optional_timestamp::deserialize"
+    )]
+    pub bucket: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -38,9 +54,15 @@ pub struct SpendStats {
 
 impl FirestoreSpendTracker {
     /// Load initial spend docs and start listening for changes.
-    pub async fn start(provider: Arc<dyn Provider<SpendDoc>>) -> Result<Arc<Self>, Error> {
+    /// `provider` reads the unbucketed lifetime collection.
+    /// `daily_provider` reads the daily-bucketed collection.
+    pub async fn start(
+        provider: Arc<dyn Provider<SpendDoc>>,
+        daily_provider: Arc<dyn Provider<SpendDoc>>,
+    ) -> Result<Arc<Self>, Error> {
         let tracker = Arc::new(Self {
             spend: RwLock::new(AHashMap::new()),
+            daily: DailyMap::new(),
         });
 
         let t = tracker.clone();
@@ -49,6 +71,14 @@ impl FirestoreSpendTracker {
             .await?;
 
         tracker.load(initial);
+
+        let t = tracker.clone();
+        let initial_daily = daily_provider
+            .start(Box::new(move |event| t.handle_daily_event(event)))
+            .await?;
+
+        tracker.load_daily(initial_daily);
+
         Ok(tracker)
     }
 
@@ -60,7 +90,7 @@ impl FirestoreSpendTracker {
                 continue;
             };
 
-            let micros = Self::extract_micros(doc);
+            let micros = Self::extract_cpm_micros(doc);
             *spend.entry(campaign_id.clone()).or_default() += micros;
         }
 
@@ -69,7 +99,51 @@ impl FirestoreSpendTracker {
         *self.spend.write() = spend;
     }
 
+    /// Load daily docs, skipping any whose bucket date is not today.
+    fn load_daily(&self, docs: Vec<SpendDoc>) {
+        let entries = docs.iter().filter_map(|doc| {
+            if let Some(bucket) = &doc.bucket {
+                if !is_bucket_today(bucket) {
+                    return None;
+                }
+            }
+            let campaign_id = doc.fields.get("campaign_id")?;
+            Some((campaign_id.clone(), Self::extract_cpm_micros(doc)))
+        });
+        self.daily.load(entries, "spend");
+    }
+
     fn handle_event(&self, event: ProviderEvent<SpendDoc>) {
+        Self::apply_lifetime_event(&self.spend, event);
+    }
+
+    fn handle_daily_event(&self, event: ProviderEvent<SpendDoc>) {
+        match &event {
+            ProviderEvent::Added(doc) | ProviderEvent::Modified(doc) => {
+                if let Some(bucket) = &doc.bucket {
+                    if !is_bucket_today(bucket) {
+                        return;
+                    }
+                }
+                let Some(campaign_id) = doc.fields.get("campaign_id") else {
+                    error!(
+                        "spend doc missing campaign_id — untracked spend, potential budget overspend"
+                    );
+                    return;
+                };
+                self.daily
+                    .insert(campaign_id.clone(), Self::extract_cpm_micros(doc));
+            }
+            ProviderEvent::Removed(doc_id) => {
+                self.daily.remove_matching(doc_id);
+            }
+        }
+    }
+
+    fn apply_lifetime_event(
+        target: &RwLock<AHashMap<String, u64>>,
+        event: ProviderEvent<SpendDoc>,
+    ) {
         match event {
             ProviderEvent::Added(doc) | ProviderEvent::Modified(doc) => {
                 let Some(campaign_id) = doc.fields.get("campaign_id") else {
@@ -79,11 +153,11 @@ impl FirestoreSpendTracker {
                     return;
                 };
 
-                let micros = Self::extract_micros(&doc);
-                self.spend.write().insert(campaign_id.clone(), micros);
+                let micros = Self::extract_cpm_micros(&doc);
+                target.write().insert(campaign_id.clone(), micros);
             }
             ProviderEvent::Removed(doc_id) => {
-                let mut spend = self.spend.write();
+                let mut spend = target.write();
                 let before = spend.len();
                 spend.retain(|campaign_id, _| !doc_id.contains(campaign_id));
                 let removed = before - spend.len();
@@ -100,12 +174,9 @@ impl FirestoreSpendTracker {
         }
     }
 
-    fn extract_micros(doc: &SpendDoc) -> u64 {
+    fn extract_cpm_micros(doc: &SpendDoc) -> u64 {
         let cpm_sum = doc.stats.as_ref().map(|s| s.revenue_cpm_sum).unwrap_or(0.0);
-
-        // revenue_cpm_sum is the sum of per-impression CPM rates.
-        // Divide by 1000 to convert CPM-space → actual dollars.
-        (cpm_sum / 1000.0 * MICROS_PER_DOLLAR) as u64
+        (cpm_sum * MICROS) as u64
     }
 }
 
@@ -114,15 +185,14 @@ impl SpendTracker for FirestoreSpendTracker {
         self.spend
             .read()
             .get(campaign_id)
-            .map(|micros| *micros as f64 / MICROS_PER_DOLLAR)
+            .map(|micros| *micros as f64 / MICROS)
             .unwrap_or(0.0)
     }
 
-    /// No-op — spend arrives indirectly:
-    /// `CampaignCounterStore` flushes `CampaignCounters` to the
-    /// `pacing_campaigns` collection (unbucketed, one doc per
-    /// campaign keyed by [buyer_id, campaign_id]).
-    /// This tracker's Firestore listener on that same collection
-    /// picks up the updated `revenue_cpm_sum` field via `SpendDoc`.
+    fn daily_spend(&self, campaign_id: &str) -> f64 {
+        self.daily.get(campaign_id) as f64 / MICROS
+    }
+
+    /// No-op — spend arrives indirectly via Firestore listeners.
     fn record_spend(&self, _campaign_id: &str, _amount: f64) {}
 }

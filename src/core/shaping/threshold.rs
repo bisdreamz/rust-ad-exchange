@@ -6,7 +6,7 @@ use std::ops::{Div, Mul};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::Instant;
-use tracing::warn;
+use tracing::{trace, warn};
 
 fn calculate_effective_qps(duration_ms: u64, requests: u64) -> u32 {
     // guard against a 0ms tick interval (first interval tick fires immediately)
@@ -128,6 +128,30 @@ impl Tick {
         }
 
         let tick_duration_ms = self.duration.as_millis() as u64;
+
+        if tracing::enabled!(tracing::Level::TRACE) {
+            // Log full histogram buckets: (bucket_value, requests, qps per bucket)
+            let bucket_dump: Vec<(f32, u64, u32)> = self
+                .map
+                .iter()
+                .map(|(bucket, reqs)| {
+                    (
+                        bucket.into_inner(),
+                        *reqs,
+                        calculate_effective_qps(tick_duration_ms, *reqs),
+                    )
+                })
+                .collect();
+
+            trace!(
+                target_qps,
+                min_threshold = min_threshold.unwrap_or(0.0),
+                tick_duration_ms,
+                total_requests = self.requests,
+                buckets = ?bucket_dump,
+                "Threshold histogram snapshot"
+            );
+        }
 
         let min_threshold = min_threshold.unwrap_or(0.0);
         let mut total_threshold_reqs = 0;

@@ -140,7 +140,7 @@ mod tests {
     use crate::core::models::bidder::Endpoint;
     use rtb::BidRequestBuilder;
     use rtb::bid_request::ImpBuilder;
-    use std::sync::{Arc, OnceLock};
+    use std::sync::Arc;
 
     fn create_test_endpoint() -> Arc<Endpoint> {
         Arc::new(Endpoint::default())
@@ -199,7 +199,6 @@ mod tests {
         let callout = BidderCallout {
             endpoint: endpoint.clone(),
             req,
-            response: OnceLock::new(),
             ..Default::default()
         };
 
@@ -274,6 +273,7 @@ mod tests {
     async fn test_original_context_request_unchanged() {
         use crate::app::pipeline::ortb::context::BidderContext;
         use crate::core::models::bidder::Bidder;
+        use crate::core::models::publisher::Publisher;
 
         let original_req = BidRequestBuilder::default()
             .id("original_req".to_string())
@@ -294,10 +294,17 @@ mod tests {
             .build()
             .unwrap();
 
+        let publisher = Arc::new(Publisher {
+            id: "pub123".to_string(),
+            enabled: true,
+            ..Default::default()
+        });
+
         let context = AuctionContext::new(
             "original_req".to_string(),
             "/test".to_string(),
-            "pub123".to_string(),
+            publisher,
+            None,
             original_req,
             HttpRequestContext::default(),
         );

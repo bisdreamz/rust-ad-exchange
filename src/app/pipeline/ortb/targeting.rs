@@ -32,7 +32,7 @@ pub fn matches_targeting(targeting: &CommonTargeting, ctx: &AuctionContext, imp:
 
     if !targeting
         .pub_id_filter
-        .check(Some(&CompactString::from(ctx.pubid.as_str())))
+        .check(Some(&CompactString::from(ctx.publisher.id.as_str())))
     {
         return false;
     }
@@ -91,7 +91,6 @@ mod tests {
     use crate::core::models::targeting::{AllowedPropertyTypes, CommonTargeting, ListFilter};
     use ahash::AHashSet;
     use compact_str::CompactString;
-    use parking_lot::RwLock;
     use rtb::BidRequestBuilder;
     use rtb::bid_request::{DeviceBuilder, GeoBuilder, ImpBuilder, SiteBuilder};
 
@@ -106,11 +105,9 @@ mod tests {
             ])
             .build()
             .unwrap();
-        AuctionContext {
-            pubid: "pub1".into(),
-            req: RwLock::new(req),
-            ..Default::default()
-        }
+        let mut ctx = AuctionContext::test_default("pub1");
+        *ctx.req.get_mut() = req;
+        ctx
     }
 
     fn default_imp() -> Imp {
@@ -132,11 +129,9 @@ mod tests {
             .device(device)
             .build()
             .unwrap();
-        AuctionContext {
-            pubid: "pub1".into(),
-            req: RwLock::new(req),
-            ..Default::default()
-        }
+        let mut ctx = AuctionContext::test_default("pub1");
+        *ctx.req.get_mut() = req;
+        ctx
     }
 
     fn ctx_with_site(domain: &str) -> AuctionContext {
@@ -150,11 +145,9 @@ mod tests {
             .distributionchannel_oneof(DistributionchannelOneof::Site(site))
             .build()
             .unwrap();
-        AuctionContext {
-            pubid: "pub1".into(),
-            req: RwLock::new(req),
-            ..Default::default()
-        }
+        let mut ctx = AuctionContext::test_default("pub1");
+        *ctx.req.get_mut() = req;
+        ctx
     }
 
     fn allow_set<T: Eq + std::hash::Hash>(vals: Vec<T>) -> ListFilter<T> {

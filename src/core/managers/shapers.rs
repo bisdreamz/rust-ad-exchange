@@ -1,3 +1,4 @@
+use crate::core::cluster::ClusterDiscovery;
 use crate::core::managers::{DemandChange, DemandManager};
 use crate::core::models::bidder::{Bidder, Endpoint};
 use crate::core::models::shaping::{ShapingFeature, TrafficShaping};
@@ -21,7 +22,11 @@ fn validate_tree_params(control_percent: u32, features: &Vec<ShapingFeature>) ->
     Ok(())
 }
 
-fn create_shaper_for_endpoint(bidder: &Bidder, endpoint: &Endpoint) -> Option<Arc<TreeShaper>> {
+fn create_shaper_for_endpoint(
+    bidder: &Bidder,
+    endpoint: &Endpoint,
+    cluster: &Arc<dyn ClusterDiscovery>,
+) -> Option<Arc<TreeShaper>> {
     match &endpoint.shaping {
         TrafficShaping::None => {
             info!(
@@ -52,11 +57,12 @@ fn create_shaper_for_endpoint(bidder: &Bidder, endpoint: &Endpoint) -> Option<Ar
             Some(Arc::new(TreeShaper::new(
                 &features,
                 &metric,
-                10,
+                500,
                 &Duration::from_secs(10 * 60),
                 control_percent.clone(),
                 endpoint.qps as u32,
                 min_target_metric.clone(),
+                cluster.clone(),
             )))
         }
     }
@@ -64,10 +70,11 @@ fn create_shaper_for_endpoint(bidder: &Bidder, endpoint: &Endpoint) -> Option<Ar
 
 pub struct ShaperManager {
     shapers: RwLock<HashMap<String, Option<Arc<TreeShaper>>>>, // endpoint name -> entry
+    cluster: Arc<dyn ClusterDiscovery>,
 }
 
 impl ShaperManager {
-    pub fn new(manager: &DemandManager) -> Result<Self, Error> {
+    pub fn new(manager: &DemandManager, cluster: Arc<dyn ClusterDiscovery>) -> Result<Self, Error> {
         let mut shape_map = HashMap::new();
 
         for (bidder, endpoints) in manager.bidders_endpoints() {
@@ -82,13 +89,14 @@ impl ShaperManager {
 
                 shape_map.insert(
                     endpoint.name.clone(),
-                    create_shaper_for_endpoint(&bidder, &endpoint),
+                    create_shaper_for_endpoint(&bidder, &endpoint, &cluster),
                 );
             }
         }
 
         Ok(Self {
             shapers: RwLock::new(shape_map),
+            cluster,
         })
     }
 
@@ -110,7 +118,10 @@ impl ShaperManager {
                         continue;
                     }
                     info!("Adding shaper for new endpoint {}", ep.name);
-                    shapers.insert(ep.name.clone(), create_shaper_for_endpoint(bidder, ep));
+                    shapers.insert(
+                        ep.name.clone(),
+                        create_shaper_for_endpoint(bidder, ep, &self.cluster),
+                    );
                 }
             }
             DemandChange::Modified {
@@ -160,7 +171,10 @@ impl ShaperManager {
                                 "Rebuilding shaper for endpoint {} (features changed or new)",
                                 ep.name
                             );
-                            shapers.insert(ep.name.clone(), create_shaper_for_endpoint(bidder, ep));
+                            shapers.insert(
+                                ep.name.clone(),
+                                create_shaper_for_endpoint(bidder, ep, &self.cluster),
+                            );
                         }
                     }
                 }

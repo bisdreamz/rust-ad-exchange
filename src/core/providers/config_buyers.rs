@@ -21,8 +21,6 @@ impl Provider<Buyer> for ConfigBuyerProvider {
         &self,
         _on_event: Box<dyn Fn(ProviderEvent<Buyer>) + Send + Sync>,
     ) -> Result<Vec<Buyer>, Error> {
-        self.config_manager.get().buyers.clone().ok_or_else(|| {
-            anyhow::anyhow!("buyers must be defined in config when Firestore is not configured")
-        })
+        Ok(self.config_manager.get().buyers.clone().unwrap_or_default())
     }
 }

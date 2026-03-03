@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, Display, EnumString};
 
-#[derive(Debug, Clone, Deserialize, Serialize, AsRefStr, EnumString, Display)]
+#[derive(Debug, Clone, Deserialize, Serialize, AsRefStr, EnumString, Display, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Metric {
     /// Actual (gross) revenue generated per million outbound auctions

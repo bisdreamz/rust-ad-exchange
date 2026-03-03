@@ -1,17 +1,12 @@
 use crate::app::pipeline::ortb::AuctionContext;
-use crate::app::pipeline::ortb::context::{
-    BidResponseContext, BidderCallout, BidderContext, BidderResponseBuilder, BidderResponseState,
-};
-use crate::core::models::bidder::{BidderBuilder, Endpoint};
+use crate::app::pipeline::ortb::context::BidContext;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use pipeline::AsyncTask;
+use rtb::BidRequest;
 use rtb::bid_request::{Banner, Imp};
 use rtb::bid_response::bid::AdmOneof;
-use rtb::bid_response::{Bid, BidBuilder, SeatBidBuilder};
-use rtb::{BidRequest, BidResponseBuilder};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use rtb::bid_response::{Bid, BidBuilder};
 use tracing::{debug, warn};
 
 fn generate_display_bid(imp: &Imp, banner: &Banner) -> Result<Bid, Error> {
@@ -54,70 +49,18 @@ fn generate_psa_bids(req: &BidRequest) -> Vec<Bid> {
             None => continue,
         };
 
-        let bids = match generate_display_bid(imp, banner) {
-            Ok(bids) => bids,
+        let bid = match generate_display_bid(imp, banner) {
+            Ok(bid) => bid,
             Err(e) => {
-                warn!("Failed building bids for force bid on imp: {}", e);
+                warn!("Failed building bid for force bid on imp: {}", e);
                 continue;
             }
         };
 
-        psa_bids.push(bids);
+        psa_bids.push(bid);
     }
 
     psa_bids
-}
-
-fn build_psa_bidder_context(req: BidRequest, bids: Vec<Bid>) -> Result<BidderContext, Error> {
-    let seat_bid_result = SeatBidBuilder::default()
-        .seat("test_bidder")
-        .bid(bids)
-        .build();
-
-    if seat_bid_result.is_err() {
-        bail!("Failed to build seat bid object, skipping test bids!");
-    }
-
-    let seat_bid = seat_bid_result?;
-
-    let bid_response_result = BidResponseBuilder::default()
-        .id(req.id.clone())
-        .seatbid(vec![seat_bid])
-        .build();
-
-    if bid_response_result.is_err() {
-        bail!("Failed to build final force bid response, skipping test bids!");
-    }
-
-    let bid_response_context = BidResponseContext::from(bid_response_result?);
-
-    let bidder_response = BidderResponseBuilder::default()
-        .state(BidderResponseState::Bid(bid_response_context))
-        .latency(Duration::from_millis(1))
-        .build()?;
-
-    let callout_response = OnceLock::new();
-    callout_response.set(bidder_response).unwrap();
-
-    let bidder_callout = BidderCallout {
-        endpoint: Arc::new(Endpoint {
-            name: "test_endpoint".to_string(),
-            ..Default::default()
-        }),
-        req,
-        response: callout_response,
-        ..Default::default()
-    };
-
-    let test_bidder = BidderBuilder::default()
-        .name("test_bidder".to_string())
-        .build()?;
-
-    Ok(BidderContext {
-        bidder: Arc::new(test_bidder),
-        callouts: vec![bidder_callout],
-        ..Default::default()
-    })
 }
 
 pub struct TestBidderTask;
@@ -153,11 +96,12 @@ impl AsyncTask<AuctionContext, Error> for TestBidderTask {
             return Ok(());
         }
 
-        let bidder_context = build_psa_bidder_context(req.clone(), bids)?;
-        let mut bidders = context.bidders.lock().await;
-        bidders.push(bidder_context);
+        let bid_contexts: Vec<BidContext> = bids.into_iter().map(BidContext::from).collect();
 
-        debug!("Injected test bids into response!");
+        let mut staging = context.direct_bid_staging.lock().await;
+        staging.extend(bid_contexts);
+
+        debug!("Injected {} test bids into direct staging", staging.len());
 
         Ok(())
     }

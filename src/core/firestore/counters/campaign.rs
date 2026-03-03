@@ -70,14 +70,18 @@ pub struct CampaignCounterStore {
     by_detail: Arc<CounterStore<CampaignCounters>>,
     /// Unbucketed spend per campaign — one doc per campaign with
     /// cumulative server-side increments. Read by FirestoreSpendTracker
-    /// for pacing decisions.
+    /// for lifetime (Total) pacing decisions.
     spend: Arc<CounterStore<CampaignCounters>>,
+    /// Daily-bucketed spend per campaign — one doc per campaign per day.
+    /// Read by FirestoreSpendTracker for daily (Daily) pacing decisions.
+    spend_daily: Arc<CounterStore<CampaignCounters>>,
 }
 
-/// Collection name for the unbucketed spend store.
-/// Shared between CampaignCounterStore (writes) and
-/// FirestoreSpendTracker (reads).
+/// Collection name for the unbucketed (lifetime) spend store.
 pub const SPEND_COLLECTION: &str = "pacing_campaigns";
+
+/// Collection name for the daily-bucketed spend store.
+pub const SPEND_DAILY_COLLECTION: &str = "pacing_campaigns_daily";
 
 impl CampaignCounterStore {
     pub fn new(
@@ -122,10 +126,17 @@ impl CampaignCounterStore {
                 Box::new(|values| format!("campaigns/{}/stats", values[1])),
             ),
             spend: CounterStore::new(
-                db,
+                db.clone(),
                 SPEND_COLLECTION.to_string(),
                 vec!["buyer_id", "campaign_id"],
                 None, // unbucketed — one doc per campaign, cumulative
+                update_interval,
+            ),
+            spend_daily: CounterStore::new(
+                db,
+                SPEND_DAILY_COLLECTION.to_string(),
+                vec!["buyer_id", "campaign_id"],
+                Some(Duration::from_hours(24)),
                 update_interval,
             ),
         }
@@ -171,6 +182,7 @@ impl CampaignCounterStore {
         );
 
         self.spend.merge(&[buyer_id, campaign_id], buffer);
+        self.spend_daily.merge(&[buyer_id, campaign_id], buffer);
     }
 
     pub async fn shutdown(&self) {
@@ -178,5 +190,6 @@ impl CampaignCounterStore {
         self.by_campaign.shutdown().await;
         self.by_detail.shutdown().await;
         self.spend.shutdown().await;
+        self.spend_daily.shutdown().await;
     }
 }

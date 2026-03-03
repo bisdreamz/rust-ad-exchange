@@ -106,7 +106,7 @@ impl DemandCountersTask {
                     COUNTER_CALLOUT_SKIP.add(
                         1,
                         &[
-                            KeyValue::new("pub_id", context.pubid.clone()),
+                            KeyValue::new("pub_id", context.publisher.id.clone()),
                             KeyValue::new("channel", channel.to_string()),
                             KeyValue::new("bidder_id", bidder_id.to_string()),
                             KeyValue::new("endpoint", bidder_callout.endpoint.name.clone()),

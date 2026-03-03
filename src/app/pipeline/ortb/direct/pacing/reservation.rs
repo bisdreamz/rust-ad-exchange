@@ -18,6 +18,19 @@ pub fn system_epoch_clock() -> EpochClock {
     })
 }
 
+/// High-resolution clock returning epoch seconds as f64.
+/// Sub-second precision enables smooth token bucket refill.
+pub type FineClock = Arc<dyn Fn() -> f64 + Send + Sync>;
+
+pub fn system_fine_clock() -> FineClock {
+    Arc::new(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before epoch")
+            .as_secs_f64()
+    })
+}
+
 /// Fixed-size circular buffer of bid value per time slot.
 /// Old slots are zeroed on access when time advances.
 /// All operations are lock-free using relaxed atomics.

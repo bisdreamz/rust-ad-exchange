@@ -105,12 +105,14 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                     "/br/json/{pubid}",
                     web::post().to({
                         let pipeline = rtb_pipeline.clone();
+                        let pm = pub_manager.clone();
                         move |pubid: web::Path<String>,
                               req: FastJson<BidRequest>,
                               http_req: HttpRequest| {
                             let auction_id = req.id.clone();
                             let pubid = pubid.into_inner();
                             let p = pipeline.clone();
+                            let pm = pm.clone();
                             async move {
                                 json_bid_handler(
                                     auction_id,
@@ -118,6 +120,7 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
                                     req,
                                     http_req,
                                     p,
+                                    pm,
                                     span_sample_rate,
                                 )
                                 .await

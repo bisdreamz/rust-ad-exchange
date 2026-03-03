@@ -5,7 +5,7 @@ use anyhow::Error;
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, info};
 
 struct CreativeCache {
     by_id: HashMap<String, Arc<Creative>>,
@@ -60,7 +60,14 @@ impl CreativeManager {
     }
 
     fn load(&self, creatives: Vec<Creative>) {
+        let total = creatives.len();
         let cache = CreativeCache::build(creatives.into_iter().map(Arc::new));
+        info!(
+            "Loaded {} active creatives across {} campaigns (total: {})",
+            cache.by_campaign.values().map(|v| v.len()).sum::<usize>(),
+            cache.by_campaign.len(),
+            total
+        );
         self.cache.store(Arc::new(cache));
     }
 
@@ -87,10 +94,6 @@ impl CreativeManager {
                 });
             }
         }
-    }
-
-    pub fn get(&self, id: &str) -> Option<Arc<Creative>> {
-        self.cache.load().by_id.get(id).cloned()
     }
 
     /// Creatives belonging to a campaign. Called after campaign

@@ -1,5 +1,6 @@
 use crate::core::enrichment::device::DeviceInfo;
 use crate::core::models::bidder::{Bidder, Endpoint};
+use crate::core::models::buyer::Buyer;
 use crate::core::models::campaign::Campaign;
 use crate::core::models::creative::Creative;
 use crate::core::models::deal::Deal;
@@ -75,6 +76,7 @@ impl Extensions {
 /// access across both direct and RTB bid paths.
 #[derive(Debug, Clone)]
 pub struct DirectCampaignContext {
+    pub buyer: Arc<Buyer>,
     pub campaign: Arc<Campaign>,
     pub creative: Arc<Creative>,
 }
@@ -277,14 +279,16 @@ pub struct HttpRequestContext {
 /// * `req` - The inbound [`BidRequest`] which is intended to use interior mutability
 /// for required adaptations, for example during supplementing device data
 /// * `res` - The final outbound [`BidResponseState`] representing the final
-/// outcome result of processing
+/// outcome result of processing. **This is FINAL** — once set, it IS the
+/// response and prevents all subsequent tasks from overriding it.
+/// Only enrichment/validation tasks (blocked publisher, bad request, etc.)
+/// should set this to abort processing early. RTB demand tasks must NOT
+/// set this; they use `rtb_nbr` instead.
 /// * `bidders` - The list of [`BidderContext`] assigned by the bidder matching stage,
 /// and optionally further modified by other stages, which contains the list of bidders
 /// and bidder specific adapted request objects
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AuctionContext {
-    /// Raw pubid provided from the http path, pre-validation
-    pub pubid: String,
     /// The original auction ID sent from pub, which
     /// we need to set in our response
     pub original_auction_id: String,
@@ -292,18 +296,32 @@ pub struct AuctionContext {
     pub http: HttpRequestContext,
     pub device: OnceLock<DeviceInfo>,
     pub identity: OnceLock<IdentityContext>,
-    /// The ['Publisher'] object if the pubid value has been recognized
-    pub publisher: OnceLock<Arc<Publisher>>,
+    /// The resolved ['Publisher'] for this request
+    pub publisher: Arc<Publisher>,
     /// Resolved placement for this request. Set by upstream handlers that already
     /// performed the lookup (jstag, prebid, etc.) so pipeline tasks don't repeat it.
-    pub placement: OnceLock<Arc<Placement>>,
+    pub placement: Option<Arc<Placement>>,
     /// Locally assigned but globally unique identifier for this auction
     pub event_id: String,
     /// Tag to describe the inbound source of this request, e.g. rtb, rtb_protobuf, prebid, etc
     pub source: String,
     pub req: RwLock<BidRequest>,
+    /// The final outbound response. **This is FINAL** — once set, it IS the
+    /// response and prevents all subsequent tasks from overriding it.
+    /// Only enrichment/validation tasks (blocked publisher, bad request, etc.)
+    /// should set this to abort processing early. RTB demand tasks must NOT
+    /// set this; they use `rtb_nbr` instead.
     pub res: OnceLock<BidResponseState>,
     pub bidders: tokio::sync::Mutex<Vec<BidderContext>>,
+    /// Staging area for direct campaign bid results.
+    /// Populated by DirectCampaignMatchingTask, then moved into
+    /// `bidders` by the merge task before shared bid processing.
+    /// After merge, this is empty.
+    pub direct_bid_staging: tokio::sync::Mutex<Vec<BidContext>>,
+    /// RTB-specific no-bid reason, set by RTB tasks when no viable demand exists.
+    /// If settlement finds zero bids from all sources, it uses this NBR code
+    /// for the specific reason. If direct campaign bids exist, this is ignored.
+    pub rtb_nbr: OnceLock<(u32, &'static str)>,
     /// Reason we may have blocked this publisher request
     /// from reaching auction, so we may persist these
     /// stats as individually reportable
@@ -318,19 +336,45 @@ impl AuctionContext {
     pub fn new(
         original_id: String,
         source: String,
-        pubid: String,
+        publisher: Arc<Publisher>,
+        placement: Option<Arc<Placement>>,
         req: BidRequest,
         http: HttpRequestContext,
     ) -> AuctionContext {
         AuctionContext {
             original_auction_id: original_id,
-            pubid,
             http,
+            device: OnceLock::new(),
+            identity: OnceLock::new(),
+            publisher,
+            placement,
             event_id: Uuid::new_v4().to_string(),
             source,
             req: RwLock::new(req),
+            res: OnceLock::new(),
             bidders: tokio::sync::Mutex::new(Vec::new()),
-            ..Default::default()
+            direct_bid_staging: tokio::sync::Mutex::new(Vec::new()),
+            rtb_nbr: OnceLock::new(),
+            block_reason: OnceLock::new(),
+            ext: Extensions::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub fn test_default(pubid: &str) -> AuctionContext {
+        let publisher = Arc::new(Publisher {
+            id: pubid.to_string(),
+            enabled: true,
+            name: format!("test_{pubid}"),
+            ..Default::default()
+        });
+        AuctionContext::new(
+            String::new(),
+            String::new(),
+            publisher,
+            None,
+            BidRequest::default(),
+            HttpRequestContext::default(),
+        )
     }
 }

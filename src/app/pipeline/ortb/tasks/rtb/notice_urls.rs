@@ -12,7 +12,6 @@ use pipeline::AsyncTask;
 use rtb::child_span_info;
 use rtb::common::DataUrl;
 use rtb::common::bidresponsestate::BidResponseState;
-use rtb::utils::detect_ad_format;
 use tracing::debug;
 use tracing::{Instrument, warn};
 
@@ -27,11 +26,6 @@ fn build_billing_event(
     country: &str,
     device_os: Os,
 ) -> Result<BillingEvent, Error> {
-    let ad_format = match detect_ad_format(&bid_context.bid) {
-        Some(ad_format) => ad_format,
-        None => bail!("Could not detect ad format when building billing event"),
-    };
-
     let timestamp = rtb::common::utils::epoch_timestamp();
 
     let cpm_cost = match bid_context.reduced_bid_price {
@@ -49,7 +43,6 @@ fn build_billing_event(
         .cpm_gross(bid_context.original_bid_price)
         .pub_id(pub_id.to_string())
         .event_source(None)
-        .bid_ad_format(ad_format)
         .channel(channel)
         .device_type(device_type)
         .country(country.to_string())
@@ -261,7 +254,7 @@ impl NotificationsUrlCreationTask {
 
                 if attach_event_handler_urls(
                     &context.event_id,
-                    &context.pubid,
+                    &context.publisher.id,
                     &self.event_domain,
                     &self.billing_path,
                     &bidder_context.bidder,
