@@ -9,31 +9,17 @@ use tracing::{debug, info};
 
 struct CreativeCache {
     by_id: HashMap<String, Arc<Creative>>,
-    /// Creatives indexed by campaign_id. After a campaign wins
-    /// targeting + budget selection, its creatives are fetched
-    /// here for format matching and rotation.
-    by_campaign: HashMap<String, Vec<Arc<Creative>>>,
 }
 
 impl CreativeCache {
     fn build(creatives: impl IntoIterator<Item = Arc<Creative>>) -> Self {
         let mut by_id = HashMap::new();
-        let mut by_campaign: HashMap<String, Vec<Arc<Creative>>> = HashMap::new();
 
         for creative in creatives {
-            by_id.insert(creative.id.clone(), Arc::clone(&creative));
-
-            if creative.status != Status::Active {
-                continue;
-            }
-
-            by_campaign
-                .entry(creative.campaign_id.clone())
-                .or_default()
-                .push(creative);
+            by_id.insert(creative.id.clone(), creative);
         }
 
-        CreativeCache { by_id, by_campaign }
+        CreativeCache { by_id }
     }
 }
 
@@ -46,7 +32,6 @@ impl CreativeManager {
         let manager = Arc::new(Self {
             cache: ArcSwap::from_pointee(CreativeCache {
                 by_id: HashMap::new(),
-                by_campaign: HashMap::new(),
             }),
         });
 
@@ -62,12 +47,12 @@ impl CreativeManager {
     fn load(&self, creatives: Vec<Creative>) {
         let total = creatives.len();
         let cache = CreativeCache::build(creatives.into_iter().map(Arc::new));
-        info!(
-            "Loaded {} active creatives across {} campaigns (total: {})",
-            cache.by_campaign.values().map(|v| v.len()).sum::<usize>(),
-            cache.by_campaign.len(),
-            total
-        );
+        let active = cache
+            .by_id
+            .values()
+            .filter(|c| c.status == Status::Active)
+            .count();
+        info!("Loaded {} active creatives (total: {})", active, total);
         self.cache.store(Arc::new(cache));
     }
 
@@ -96,15 +81,9 @@ impl CreativeManager {
         }
     }
 
-    /// Creatives belonging to a campaign. Called after campaign
-    /// wins targeting + budget selection, for format matching
-    /// and creative rotation.
-    pub fn by_campaign(&self, campaign_id: &str) -> Vec<Arc<Creative>> {
-        self.cache
-            .load()
-            .by_campaign
-            .get(campaign_id)
-            .cloned()
-            .unwrap_or_default()
+    /// Look up a creative by its ID. Used by the bid pipeline
+    /// to resolve campaign.creatives[] entries.
+    pub fn by_id(&self, id: &str) -> Option<Arc<Creative>> {
+        self.cache.load().by_id.get(id).cloned()
     }
 }

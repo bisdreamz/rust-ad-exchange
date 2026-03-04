@@ -23,6 +23,9 @@ pub struct ActiveTick {
     timestamp: Instant,
     /// Total count of requests (increments) happened within tick period
     requests: AtomicU64,
+    /// Record of boost eligible requests, which are separate
+    /// from the total request counters!
+    boost_eligible_requests: AtomicU64,
     /// Map containing the ordered (descending) key buckets -> increments
     map: RwLock<BTreeMap<NotNan<f32>, u64>>,
 }
@@ -32,6 +35,7 @@ impl ActiveTick {
         ActiveTick {
             timestamp: Instant::now(),
             requests: AtomicU64::new(0),
+            boost_eligible_requests: AtomicU64::new(0),
             map: RwLock::new(BTreeMap::new()),
         }
     }
@@ -44,6 +48,14 @@ impl ActiveTick {
         *map.entry(bucket_key).or_insert(0) += 1;
 
         self.requests.fetch_add(1, Ordering::Release);
+    }
+
+    /// Increment counter to indicate a request
+    /// was eligible for boost. This does not replace
+    /// the need to call the proper ['increment'] method
+    /// with the associated prediction value!
+    pub fn boost_eligible_increment(&self) {
+        self.boost_eligible_requests.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -69,6 +81,9 @@ pub struct Tick {
     duration: Duration,
     /// Total request count recorded during this tick
     requests: u64,
+    /// Requests that meet specific criteria for
+    /// being eligible for boost, e.g. under-trained
+    boost_eligible_requests: u64,
     /// The map keeping the raw histogram info of bucket prediction
     /// value -> requests at that bucket
     map: BTreeMap<NotNan<f32>, u64>,
@@ -79,6 +94,7 @@ impl Tick {
         Tick {
             duration: Instant::now().duration_since(active_tick.timestamp),
             requests: active_tick.requests.load(Ordering::Acquire),
+            boost_eligible_requests: active_tick.boost_eligible_requests.load(Ordering::Acquire),
             map: active_tick.map.into_inner(),
         }
     }
@@ -89,6 +105,7 @@ impl Tick {
     }
 
     /// The total requests recorded within the tick
+    /// regardless of their state or eligibility
     pub fn total_requests(&self) -> u64 {
         self.requests
     }
@@ -99,6 +116,15 @@ impl Tick {
     /// longer than a second are averaged into a per-second result
     pub fn effective_qps(&self) -> u32 {
         calculate_effective_qps(self.duration.as_millis() as u64, self.requests)
+    }
+
+    /// Calculates the effective average QPS across the tick duration
+    /// of requests that were specifically eligible for boost accel
+    pub fn effective_boost_eligible_qps(&self) -> u32 {
+        calculate_effective_qps(
+            self.duration.as_millis() as u64,
+            self.boost_eligible_requests,
+        )
     }
 
     /// Retrieve the ['QpsThreshold'] which is the highest bucket threshold
@@ -255,6 +281,14 @@ impl QpsHistogram {
         tick.increment(not_nan_bucket);
 
         Ok(())
+    }
+
+    /// Record a request which was boost eligible,
+    /// this does not replace the need to call
+    /// the associated record_request with the
+    /// prediction value!
+    pub fn record_boost_eligible_request(&self) {
+        self.tick.lock().boost_eligible_increment();
     }
 
     /// Cycles the active tick and begins a new tick, returning a completed ['Tick'] which

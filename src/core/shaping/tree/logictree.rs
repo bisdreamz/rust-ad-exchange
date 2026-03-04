@@ -32,6 +32,7 @@ fn task_cycle_threshold(
             threshold: threshold.threshold,
             qps_passing: threshold.avg_qps,
             qps_avail: tick.effective_qps(),
+            qps_boost_eligible: tick.effective_boost_eligible_qps(),
         },
         None => {
             // this happens when no data yet or nothing satisfies the
@@ -39,6 +40,7 @@ fn task_cycle_threshold(
             ThresholdState {
                 threshold: 0.0,
                 qps_passing: 0,
+                qps_boost_eligible: tick.effective_boost_eligible_qps(),
                 qps_avail: tick.effective_qps(),
             }
         }
@@ -84,6 +86,8 @@ struct ThresholdState {
     /// Total QPS passing the target metric as measured
     /// by this endpoint shaper on this node
     pub qps_passing: u32,
+    /// Total QPS that was recorded as being boost eligible
+    pub qps_boost_eligible: u32,
 }
 
 #[derive(Debug, AsRefStr, EnumString, Display)]
@@ -101,6 +105,7 @@ pub struct ShapingResult {
     pub metric_target: f32,
     pub pred_depth: u32,
     pub features: Vec<Feature>,
+    pub raw_prediction: Option<RtbPredictionOutput>,
 }
 
 struct DynamicConfig {
@@ -279,14 +284,10 @@ impl TreeShaper {
         let cfg = self.config.load();
         let local_qps_limit = local_qps_limit(cfg.qps_limit, self.cluster.cluster_size());
 
-        // We will continuously offset this avail pool by the amounts
-        // consumed at certain code paths to ensure later QPS shares
-        // are properly adjusted, e.g. we dont calculate a boost
-        // passing with the *total* qps, when in fact it only sees
-        // evaluations for (avail - passing - exploratory). Pool
-        // starts at the letter of the local QPS limit or the actual
-        // available qps if less than endpoint limit
-        let avail_qps_pool =
+        // for some metrics like exploratory we want to calculate
+        // off of the "effective" qps that is
+        // min(local endpoint limit, actually available)
+        let effective_qps_limit =
             tree::utils::calc_effective_avail_pool(local_qps_limit, state.qps_avail);
 
         let prediction = match prediction_opt {
@@ -306,6 +307,7 @@ impl TreeShaper {
                     metric_target: state.threshold,
                     pred_depth: 0,
                     features: req_features,
+                    raw_prediction: None,
                 });
             }
         };
@@ -331,26 +333,22 @@ impl TreeShaper {
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
                 features: req_features,
+                raw_prediction: Some(prediction.value),
             });
         }
 
-        /* avail_qps_pool = avail_qps_pool.saturating_sub(state.qps_passing);
-        if avail_qps_pool == 0 && state.threshold > 0.0 {
-            // how is this possible? this says that all qps passing = qps avail
-            // but it didnt pass the check above?
+        // calculate what is remaining available after consumed by passing
+        let avail_after_passing = state.qps_avail.saturating_sub(state.qps_passing);
 
-            warn!(
-                "Passing QPS ({}) is >= available ({}) but failed metric?! threshold {} target {} prediction {:?}",
-                state.qps_passing, state.qps_avail, state.threshold, metric_value, prediction
-            );
-        } */
+        // inbound = 10,000
+        // limit = 1000
+        // passing = 950
+        // exploratory_qps = percent(exploratory_perc, effective_limit) = 50
+        // actual passing check = .. passes_percent(exploratory_qps, avail_after_passing)
+        let qps_exploratory =
+            tree::utils::qps_budget_exploratory(cfg.explore_percent, effective_qps_limit);
 
-        let qps_exploratory = tree::utils::qps_budget_exploratory(
-            cfg.explore_percent,
-            avail_qps_pool, // must be entire available pool
-        );
-
-        if tree::utils::qps_passes_percentage(qps_exploratory, avail_qps_pool) {
+        if tree::utils::qps_passes_percentage(qps_exploratory, avail_after_passing) {
             debug!("Request failed shaping but passed exploratory");
 
             return Ok(ShapingResult {
@@ -359,14 +357,21 @@ impl TreeShaper {
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
                 features: req_features,
+                raw_prediction: Some(prediction.value),
             });
         }
 
-        let qps_pool_after_exploratory_passing = avail_qps_pool
+        // boost is the "free space" we have within our
+        // endpoint QPS limit, unused currently by
+        // exploratory or passing volume. we will
+        // allow us to borrow up to the endpoint
+        // limit to accelerate shaping learnings on new
+        // or underobserved ad segments
+        let free_budget_after_passing_exploratory = effective_qps_limit
             .saturating_sub(qps_exploratory)
             .saturating_sub(state.qps_passing);
 
-        if qps_pool_after_exploratory_passing == 0 {
+        if free_budget_after_passing_exploratory == 0 {
             debug!(
                 "Request failed shaping. Full QPS allocation used by passing and exploratory, blocking boost"
             );
@@ -377,6 +382,7 @@ impl TreeShaper {
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
                 features: req_features,
+                raw_prediction: Some(prediction.value),
             });
         }
 
@@ -394,12 +400,24 @@ impl TreeShaper {
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
                 features: req_features,
+                raw_prediction: Some(prediction.value),
             });
         }
 
+        // we keep counters specific to boost eligible
+        // reqs so we can calculate their passing
+        // percentages properly since we only want
+        // to count the under-trained inventory here
+        self.histogram.record_boost_eligible_request();
+
         // now we have the qps of boost, calculate its passing
-        // against the total effective qps pool
-        if tree::utils::qps_passes_percentage(qps_pool_after_exploratory_passing, avail_qps_pool) {
+        // against the total effective *available* qps pool
+        // from the publisher remaining, which we
+        // will observe at this code path
+        if tree::utils::qps_passes_percentage(
+            free_budget_after_passing_exploratory,
+            state.qps_boost_eligible,
+        ) {
             debug!("Request passing through boost");
 
             return Ok(ShapingResult {
@@ -408,12 +426,13 @@ impl TreeShaper {
                 metric_target: state.threshold,
                 pred_depth: prediction.depth as u32,
                 features: req_features,
+                raw_prediction: Some(prediction.value),
             });
         }
 
         debug!(
             "Request failed shaping, exploratory, and boost - blocking! Had {} boost QPS",
-            qps_pool_after_exploratory_passing
+            state.qps_boost_eligible
         );
 
         Ok(ShapingResult {
@@ -422,6 +441,7 @@ impl TreeShaper {
             metric_target: state.threshold,
             pred_depth: prediction.depth as u32,
             features: req_features,
+            raw_prediction: Some(prediction.value),
         })
     }
 
@@ -491,7 +511,7 @@ impl TreeShaper {
             .map_err(|e| anyhow!("Failed debug predict on tree impression: {}", e))?
         {
             Some(prediction) => {
-                info!(
+                debug!(
                     "Pred result after imp train:: {:?}\t Prediction: {:?} rev gross {}",
                     features, prediction, cpm_gross
                 );

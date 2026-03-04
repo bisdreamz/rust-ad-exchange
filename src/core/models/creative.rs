@@ -67,13 +67,18 @@ impl Into<CreativeKind> for CreativeFormat {
 }
 
 /// Creative used for direct campaigns
-/// managed via self platform
+/// managed via self platform. Decoupled from campaigns —
+/// owned by buyer_id with optional brand association.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Creative {
     pub status: Status,
     pub id: String,
     pub name: String,
-    pub campaign_id: String,
+    /// Optional brand association (advertiser)
+    #[serde(default)]
+    pub advertiser_id: Option<String>,
+    /// Owning company
+    pub buyer_id: String,
     pub format: CreativeFormat,
     /// The raw creative content,
     /// kind of which indicated by ['CreativeFormat']

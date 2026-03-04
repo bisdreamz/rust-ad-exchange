@@ -88,6 +88,7 @@ impl TrafficShapingTask {
                     span.record("metric_target", res.metric_target);
                     span.record("pred_depth", res.pred_depth);
                     span.record("features", format!("{:?}", res.features));
+                    span.record("raw_prediction_state", format!("{:?}", res.raw_prediction));
                 }
 
                 let mut attrs = vec![

@@ -3,12 +3,18 @@ use crate::core::shaping::tree::serializers;
 use arc_swap::ArcSwap;
 use logictree::{Feature, PredictionHandler};
 use parking_lot::RwLock;
+use rtb::common::utils::epoch_timestamp;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::ops::{Div, Mul};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Decay window (10 mins) between how often
+/// we average down results to support
+/// bias toward new learnings
+const DECAY_WINDOW_SECS: u64 = 10 * 60;
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub(crate) struct HandlerState {
@@ -36,6 +42,15 @@ impl HandlerState {
         self.rev_gross += input.rev_gross as f64;
         self.rev_cost += input.rev_cost as f64;
     }
+
+    fn decay(&mut self) {
+        self.auctions /= 2;
+        self.bids /= 2;
+        self.impressions /= 2;
+        self.bids_value /= 2.0;
+        self.rev_gross /= 2.0;
+        self.rev_cost /= 2.0;
+    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
@@ -54,7 +69,7 @@ impl RtbPredictionOutput {
     pub fn metric_value(&self, metric: &Metric) -> f32 {
         match metric {
             Metric::BidRate => self.bid_rate_percent(),
-            Metric::Bvpm => self.bid_value_per_mille(),
+            Metric::Bvpm => self.bid_value_per_million_auctions(),
             Metric::FillRate => self.fill_rate_percent(),
             Metric::Rpm => self.rev_per_million_auctions(),
         }
@@ -73,7 +88,7 @@ impl RtbPredictionOutput {
         self.state.rev_gross.mul(cpm_auction_factor) as f32
     }
 
-    pub fn bid_value_per_mille(&self) -> f32 {
+    pub fn bid_value_per_million_auctions(&self) -> f32 {
         if self.state.bids == 0 || self.state.auctions == 0 {
             return 0.0;
         }
@@ -126,6 +141,8 @@ pub struct RtbPredictionHandler {
     last_active: AtomicU64,
     #[serde(with = "serializers::rwlock_serde")]
     state: RwLock<HandlerState>,
+    #[serde(with = "serializers::atomic_u64_serde")]
+    last_decay: AtomicU64,
     // this can be updated dynamically
     // which we need to sort picking
     // prediction branch for multi value features
@@ -168,19 +185,34 @@ impl RtbPredictionHandler {
         Self {
             min_auctions: min_decision_auctions,
             segment_ttl_secs,
-            last_active: AtomicU64::new(rtb::common::utils::epoch_timestamp()),
+            last_active: AtomicU64::new(epoch_timestamp()),
             state: RwLock::new(HandlerState::default()),
             metric,
+            last_decay: AtomicU64::new(epoch_timestamp()),
         }
     }
 }
 
 impl PredictionHandler<RtbTrainingInput, RtbPredictionOutput> for RtbPredictionHandler {
     fn train(&self, input: &RtbTrainingInput, _next_feature: Option<&Feature>) -> () {
-        self.last_active
-            .store(rtb::common::utils::epoch_timestamp(), Ordering::Relaxed);
+        let now = epoch_timestamp();
 
-        self.state.write().add(input);
+        self.last_active.store(now, Ordering::Relaxed);
+
+        let mut state = self.state.write();
+        let elapsed =
+            Duration::from_millis(now.saturating_sub(self.last_decay.load(Ordering::Relaxed)));
+
+        // Decay if we can still leave at least a 4x min auctions
+        // confidence base, dont destroy learnings but
+        // make space for new learnings
+        if elapsed.as_secs() >= DECAY_WINDOW_SECS && state.auctions >= self.min_auctions as u64 * 4
+        {
+            state.decay();
+            self.last_decay.store(now, Ordering::Relaxed);
+        }
+
+        state.add(input);
     }
 
     fn predict(&self) -> RtbPredictionOutput {

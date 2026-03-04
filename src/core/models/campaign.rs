@@ -3,6 +3,13 @@ use crate::core::models::targeting::CommonTargeting;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// A creative attached to a campaign with an enabled toggle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CampaignCreative {
+    pub creative_id: String,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CampaignPacing {
     /// Flat even pacing — equal spend rate every hour
@@ -55,6 +62,14 @@ pub struct Campaign {
     pub strategy: PricingStrategy,
     pub advertiser_id: String,
     pub targeting: CampaignTargeting,
+    /// Campaign-level destination URL. Creatives reference this
+    /// via the ${CLICK_URL} macro in their template HTML.
+    #[serde(default)]
+    pub click_url: Option<String>,
+    /// Creatives attached to this campaign with enabled toggles.
+    /// Replaces the old campaign_id-based creative lookup.
+    #[serde(default)]
+    pub creatives: Vec<CampaignCreative>,
 }
 
 fn default_budget_type() -> BudgetType {

@@ -146,13 +146,16 @@ impl DirectCampaignMatchingTask {
                         continue;
                     }
 
-                    let creatives = self.creative_manager.by_campaign(&candidate.campaign.id);
-                    let creative = match creative::select_creative(&creatives, imp) {
+                    let creative = match creative::select_creative(
+                        &candidate.campaign.creatives,
+                        &self.creative_manager,
+                        imp,
+                    ) {
                         Some(c) => c,
                         None => {
                             trace!(
                                 campaign = %candidate.campaign.id,
-                                available = creatives.len(),
+                                attached = candidate.campaign.creatives.len(),
                                 "No matching creative for imp"
                             );
                             pool.swap_remove(idx);

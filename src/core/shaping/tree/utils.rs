@@ -14,16 +14,17 @@ pub fn calc_effective_avail_pool(local_qps_limit: u32, state_avail_qps: u32) -> 
 /// Calculate the QPS value of exploratory from a percentage
 /// of the available qps pool, which should be the min
 /// of available qps or endpoint limit.
-/// returns percentageof avail qps or 1 if 0 pool size
+/// Will never return less than 1 available exploratory
+/// qps for learning safety
 pub fn qps_budget_exploratory(explore_budget_percent: u32, avail_qps_pool: u32) -> u32 {
     if explore_budget_percent == 0 || avail_qps_pool == 0 {
         return 1;
     }
 
     // Convert 5 -> 0.05
-    let explore_ratio = explore_budget_percent.max(1) as f32 / 100.0;
+    let explore_ratio = explore_budget_percent as f32 / 100.0;
 
-    (avail_qps_pool as f32 * explore_ratio) as u32
+    ((avail_qps_pool as f32 * explore_ratio) as u32).max(1)
 }
 
 /// Calculate the max budget of passing QPS defined as

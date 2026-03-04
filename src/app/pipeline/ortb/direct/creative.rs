@@ -1,14 +1,25 @@
+use crate::core::managers::CreativeManager;
+use crate::core::models::campaign::CampaignCreative;
+use crate::core::models::common::Status;
 use crate::core::models::creative::{Creative, CreativeFormat};
 use rtb::bid_request::Imp;
 use std::sync::Arc;
 use tracing::trace;
 
-/// Selects a creative from the campaign's creatives that matches
-/// the imp's format requirements. If multiple match, picks one
-/// at random for rotation.
-pub fn select_creative(creatives: &[Arc<Creative>], imp: &Imp) -> Option<Arc<Creative>> {
-    let eligible: Vec<_> = creatives
+/// Selects a creative from the campaign's attached creatives that matches
+/// the imp's format requirements. Resolves creative IDs via the manager,
+/// filters for enabled + active + format match, then picks one at random
+/// for rotation.
+pub fn select_creative(
+    campaign_creatives: &[CampaignCreative],
+    creative_manager: &CreativeManager,
+    imp: &Imp,
+) -> Option<Arc<Creative>> {
+    let eligible: Vec<_> = campaign_creatives
         .iter()
+        .filter(|cc| cc.enabled)
+        .filter_map(|cc| creative_manager.by_id(&cc.creative_id))
+        .filter(|c| c.status == Status::Active)
         .filter(|c| {
             let pass = matches_format(&c.format, imp);
             if !pass {
@@ -23,7 +34,7 @@ pub fn select_creative(creatives: &[Arc<Creative>], imp: &Imp) -> Option<Arc<Cre
     }
 
     let idx = fastrand::usize(..eligible.len());
-    let selected = Arc::clone(eligible[idx]);
+    let selected = Arc::clone(&eligible[idx]);
     trace!(
         creative = %selected.id,
         format = %selected.format.as_str(),
