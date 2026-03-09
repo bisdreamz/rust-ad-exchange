@@ -1,6 +1,6 @@
 use crate::app::context::StartupContext;
 use crate::app::pipeline::ortb::tasks::finalizers::{
-    CampaignCountersTask, DemandCountersTask, PubCountersTask,
+    CampaignCountersTask, DealBidCountersTask, DemandCountersTask, PubCountersTask,
 };
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
 use crate::core::demand::client::DemandClient;
@@ -256,6 +256,15 @@ fn build_finalizers_pipeline(
         }
     }
 
+    let deal_store_opt = context
+        .counters_deal_store
+        .get()
+        .ok_or_else(|| anyhow!("No deal counter store option set on context"))?;
+
+    if let Some(deal_store) = deal_store_opt {
+        pipeline_builder.add_async(Box::new(DealBidCountersTask::new(deal_store.clone())));
+    }
+
     Ok(pipeline_builder.build())
 }
 
@@ -267,6 +276,7 @@ fn build_finalizers_pipeline(
 struct AuctionOrchestratorTask {
     enrichment_pipeline: Pipeline<AuctionContext, Error>,
     direct_task: Option<Box<dyn AsyncTask<AuctionContext, Error>>>,
+    resolve_macros_task: Option<tasks::direct::ResolveDirectCreativeMacrosTask>,
     conditional_rtb: ConditionalRtbTask,
     merge_task: tasks::direct::MergeDirectBidsTask,
     shared_pipeline: Pipeline<AuctionContext, Error>,
@@ -296,6 +306,11 @@ impl AuctionOrchestratorTask {
         if let Some(direct_task) = &self.direct_task {
             // Direct matching never errors — misses are silent
             let _ = direct_task.run(ctx).await;
+        }
+
+        // Phase 2a: Resolve creative macros in staged direct bids
+        if let Some(resolve_task) = &self.resolve_macros_task {
+            let _ = resolve_task.run(ctx).await;
         }
 
         // Phase 2b: Test bidder — injects synthetic bids as direct bids
@@ -385,9 +400,21 @@ pub fn build_auction_pipeline(
         _ => None,
     };
 
+    // Resolve creative macros — optional, needs cdn_domain + advertiser_manager
+    let resolve_macros_task = match (context.cdn_base.get(), context.advertiser_manager.get()) {
+        (Some(cdn_domain), Some(adv_mgr)) => {
+            Some(tasks::direct::ResolveDirectCreativeMacrosTask::new(
+                cdn_domain.clone(),
+                adv_mgr.clone(),
+            ))
+        }
+        _ => None,
+    };
+
     let orchestrator = AuctionOrchestratorTask {
         enrichment_pipeline,
         direct_task,
+        resolve_macros_task,
         conditional_rtb: ConditionalRtbTask::new(rtb_sub_pipeline),
         merge_task: tasks::direct::MergeDirectBidsTask,
         shared_pipeline,

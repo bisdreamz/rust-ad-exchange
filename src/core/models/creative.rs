@@ -24,6 +24,7 @@ pub enum CreativeKind {
 /// this type via [`from_rtb`]. Direct campaign bids
 /// carry this type directly via their creative.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum CreativeFormat {
     Banner { w: u32, h: u32 },
     Video,

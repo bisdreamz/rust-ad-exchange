@@ -188,6 +188,16 @@ impl DirectCampaignMatchingTask {
                         }
                     };
 
+                    if !buyer.enabled {
+                        trace!(
+                            buyer = %candidate.campaign.buyer_id,
+                            campaign = %candidate.campaign.id,
+                            "Buyer disabled, skipping campaign"
+                        );
+                        pool.swap_remove(idx);
+                        continue;
+                    }
+
                     let candidate = pool.swap_remove(idx);
                     let advertiser_id = candidate.campaign.advertiser_id.clone();
                     let deal_id = candidate.deal.as_ref().map(|d| d.id.as_str());

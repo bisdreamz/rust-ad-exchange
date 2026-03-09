@@ -32,8 +32,14 @@ impl BlockingTask<BillingEventContext, Error> for RecordDealBillingCountersTask 
             None => return Ok(()),
         };
 
+        let details = context
+            .details
+            .get()
+            .ok_or_else(|| anyhow!("No billing event details on context!"))?;
+
         let mut counters = DealCounters::default();
         counters.impression();
+        counters.record_spend(details.cpm_gross, details.cpm_cost);
         self.deal_store.merge(&deal.id, &counters);
 
         Ok(())

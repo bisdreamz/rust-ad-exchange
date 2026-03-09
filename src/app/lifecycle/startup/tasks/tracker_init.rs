@@ -134,10 +134,24 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
 
         context
             .spend_pacer
-            .set(spend_pacer)
+            .set(spend_pacer.clone())
             .map_err(|_| anyhow!("Failed to set spend pacer on context"))?;
 
         info!("Campaign spend pacer initialized");
+
+        // Periodic sweep: time-based transitions + budget filtering.
+        // Lives here because it needs the spend_pacer (created above).
+        if let Some(campaign_mgr) = context.campaign_manager.get() {
+            let mgr = campaign_mgr.clone();
+            let sp = spend_pacer;
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    mgr.refresh_with_budget(&|c| sp.budget_state(c));
+                }
+            });
+        }
 
         Ok(())
     }

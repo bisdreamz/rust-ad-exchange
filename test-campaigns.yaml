@@ -40,7 +40,7 @@ bidders:
 buyers:
   - id: test_buyer
     buyer_name: Test Buyer
-    status: Active
+    enabled: true
 
 advertisers:
   - id: adv_alpha
@@ -60,9 +60,8 @@ campaigns:
     advertiser_id: adv_alpha
     budget: 100.0
     budget_type: Daily
-    pacing: Fast
-    strategy:
-      FixedPrice: 1.0
+    pacing: { type: Fast }
+    strategy: { type: FixedPrice, value: 1.0 }
     start_date: "2026-02-27T00:00:00Z"
     end_date: "2026-03-06T23:59:59Z"
     targeting:
@@ -83,9 +82,8 @@ campaigns:
     advertiser_id: adv_alpha
     budget: 200.0
     budget_type: Daily
-    pacing: Fast
-    strategy:
-      FixedPrice: 2.0
+    pacing: { type: Fast }
+    strategy: { type: FixedPrice, value: 2.0 }
     start_date: "2026-02-27T00:00:00Z"
     end_date: "2026-03-06T23:59:59Z"
     targeting:
@@ -106,9 +104,8 @@ campaigns:
     advertiser_id: adv_beta
     budget: 300.0
     budget_type: Daily
-    pacing: Even
-    strategy:
-      FixedPrice: 3.0
+    pacing: { type: Even }
+    strategy: { type: FixedPrice, value: 3.0 }
     start_date: "2026-02-27T00:00:00Z"
     end_date: "2026-03-06T23:59:59Z"
     targeting:
@@ -129,9 +126,8 @@ campaigns:
     advertiser_id: adv_beta
     budget: 400.0
     budget_type: Daily
-    pacing: Even
-    strategy:
-      FixedPrice: 4.0
+    pacing: { type: Even }
+    strategy: { type: FixedPrice, value: 4.0 }
     start_date: "2026-02-27T00:00:00Z"
     end_date: "2026-03-06T23:59:59Z"
     targeting:
@@ -152,9 +148,8 @@ campaigns:
     advertiser_id: adv_alpha
     budget: 100.0
     budget_type: Daily
-    pacing: Even
-    strategy:
-      FixedPrice: 5.0
+    pacing: { type: Even }
+    strategy: { type: FixedPrice, value: 5.0 }
     start_date: "2026-02-27T00:00:00Z"
     end_date: "2026-03-06T23:59:59Z"
     targeting:
@@ -173,78 +168,68 @@ creatives:
   - id: cr_1a
     status: Active
     name: Dollar Banner 300x250
-    campaign_id: camp_1
-    format:
-      Banner: { w: 300, h: 250 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 300, h: 250 }
     content: "<b>Test Buyer Dollar Campaign - Dollar Banner 300x250</b>"
   - id: cr_1b
     status: Active
     name: Dollar Banner 728x90
-    campaign_id: camp_1
-    format:
-      Banner: { w: 728, h: 90 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 728, h: 90 }
     content: "<b>Test Buyer Dollar Campaign - Dollar Banner 728x90</b>"
 
   # camp_2 creatives
   - id: cr_2a
     status: Active
     name: Two Dollar Banner 300x250
-    campaign_id: camp_2
-    format:
-      Banner: { w: 300, h: 250 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 300, h: 250 }
     content: "<b>Test Buyer Two Dollar Campaign - Two Dollar Banner 300x250</b>"
   - id: cr_2b
     status: Active
     name: Two Dollar Banner 320x50
-    campaign_id: camp_2
-    format:
-      Banner: { w: 320, h: 50 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 320, h: 50 }
     content: "<b>Test Buyer Two Dollar Campaign - Two Dollar Banner 320x50</b>"
 
   # camp_3 creatives
   - id: cr_3a
     status: Active
     name: Three Dollar Banner 300x250
-    campaign_id: camp_3
-    format:
-      Banner: { w: 300, h: 250 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 300, h: 250 }
     content: "<b>Test Buyer Three Dollar Campaign - Three Dollar Banner 300x250</b>"
   - id: cr_3b
     status: Active
     name: Three Dollar Banner 160x600
-    campaign_id: camp_3
-    format:
-      Banner: { w: 160, h: 600 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 160, h: 600 }
     content: "<b>Test Buyer Three Dollar Campaign - Three Dollar Banner 160x600</b>"
 
   # camp_4 creatives
   - id: cr_4a
     status: Active
     name: Four Dollar Banner 300x250
-    campaign_id: camp_4
-    format:
-      Banner: { w: 300, h: 250 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 300, h: 250 }
     content: "<b>Test Buyer Four Dollar Campaign - Four Dollar Banner 300x250</b>"
   - id: cr_4b
     status: Active
     name: Four Dollar Banner 728x90
-    campaign_id: camp_4
-    format:
-      Banner: { w: 728, h: 90 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 728, h: 90 }
     content: "<b>Test Buyer Four Dollar Campaign - Four Dollar Banner 728x90</b>"
 
   # camp_5 creatives
   - id: cr_5a
     status: Active
     name: Five Dollar Banner 300x250
-    campaign_id: camp_5
-    format:
-      Banner: { w: 300, h: 250 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 300, h: 250 }
     content: "<b>Test Buyer Five Dollar Campaign - Five Dollar Banner 300x250</b>"
   - id: cr_5b
     status: Active
     name: Five Dollar Banner 300x600
-    campaign_id: camp_5
-    format:
-      Banner: { w: 300, h: 600 }
+    buyer_id: test_buyer
+    format: { type: Banner, w: 300, h: 600 }
     content: "<b>Test Buyer Five Dollar Campaign - Five Dollar Banner 300x600</b>"

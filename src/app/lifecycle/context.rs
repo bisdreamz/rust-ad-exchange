@@ -1,4 +1,5 @@
 use crate::app::config::RexConfig;
+use crate::app::pipeline::creatives::raw::RawCreativeContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
 use crate::app::pipeline::ortb::direct::pacing::{
@@ -93,6 +94,11 @@ pub struct StartupContext {
     pub sync_out_pipeline: OnceLock<Arc<Pipeline<SyncOutContext, Error>>>,
     /// The pipeline which accepts incoming partner syncs, where we receive & host partner buyeruid
     pub sync_in_pipeline: OnceLock<Arc<Pipeline<SyncInContext, Error>>>,
+    /// Protocol-relative CDN base URL for resolving ${CDN_DOMAIN} macros in creative content,
+    /// e.g. "//ads.example.com".
+    pub cdn_base: OnceLock<String>,
+    /// Pipeline for serving raw creative content (HTML, VAST XML)
+    pub raw_creative_pipeline: OnceLock<Arc<Pipeline<RawCreativeContext, Error>>>,
     /// The web server
     pub server: OnceLock<Server>,
 }

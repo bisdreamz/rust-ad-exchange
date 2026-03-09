@@ -73,7 +73,7 @@ impl AsyncTask<StartupContext, Error> for DirectManagersLoadTask {
         let (buyers, advertisers, campaigns, creatives, deals) = tokio::try_join!(
             BuyerManager::start(buy_prov),
             AdvertiserManager::start(adv_prov),
-            CampaignManager::start(camp_prov),
+            CampaignManager::start(camp_prov, firestore_opt.clone()),
             CreativeManager::start(crea_prov),
             DealManager::start(deal_prov),
         )?;

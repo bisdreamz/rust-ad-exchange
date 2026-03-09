@@ -1,13 +1,15 @@
-use crate::core::models::campaign::Campaign;
+use crate::core::models::campaign::{Campaign, DeliveryState};
 use crate::core::models::common::Status;
 use crate::core::providers::{Provider, ProviderEvent};
 use anyhow::Error;
 use arc_swap::ArcSwap;
 use chrono::Utc;
+use firestore::FirestoreDb;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tracing::{debug, info, trace};
+use tracing::{debug, info, warn};
 
 struct CampaignCache {
     by_id: HashMap<String, Arc<Campaign>>,
@@ -21,28 +23,69 @@ struct CampaignCache {
 }
 
 impl CampaignCache {
-    fn build(campaigns: impl IntoIterator<Item = Arc<Campaign>>) -> Self {
+    fn build(
+        campaigns: impl IntoIterator<Item = Arc<Campaign>>,
+        budget_check: Option<&dyn Fn(&Campaign) -> DeliveryState>,
+    ) -> (Self, Vec<(String, DeliveryState)>) {
         let mut by_id = HashMap::new();
         let mut by_buyer: HashMap<String, Vec<Arc<Campaign>>> = HashMap::new();
         let mut all = Vec::new();
+        let mut state_changes = Vec::new();
 
         let now = Utc::now();
 
         for campaign in campaigns {
-            by_id.insert(campaign.id.clone(), Arc::clone(&campaign));
-
             if campaign.status != Status::Active {
-                trace!(campaign = %campaign.id, status = ?campaign.status, "Campaign skipped: inactive");
+                by_id.insert(campaign.id.clone(), campaign);
                 continue;
             }
 
             if now < campaign.start_date {
-                trace!(campaign = %campaign.id, start = %campaign.start_date, "Campaign skipped: not yet started");
+                by_id.insert(campaign.id.clone(), campaign);
                 continue;
             }
 
             if now > campaign.end_date {
-                trace!(campaign = %campaign.id, end = %campaign.end_date, "Campaign skipped: expired");
+                let new_state = DeliveryState::FlightEnded;
+                let campaign = if campaign.delivery_state != new_state {
+                    state_changes.push((campaign.id.clone(), new_state.clone()));
+                    Arc::new(Campaign {
+                        delivery_state: new_state,
+                        ..(*campaign).clone()
+                    })
+                } else {
+                    campaign
+                };
+                by_id.insert(campaign.id.clone(), campaign);
+                continue;
+            }
+
+            // Budget check — skip exhausted campaigns from the hot set
+            if let Some(check) = &budget_check {
+                let new_state = check(&campaign);
+                let campaign = if campaign.delivery_state != new_state {
+                    state_changes.push((campaign.id.clone(), new_state.clone()));
+                    Arc::new(Campaign {
+                        delivery_state: new_state.clone(),
+                        ..(*campaign).clone()
+                    })
+                } else {
+                    campaign
+                };
+                match new_state {
+                    DeliveryState::DailyBudgetExhausted | DeliveryState::TotalBudgetExhausted => {
+                        by_id.insert(campaign.id.clone(), campaign);
+                        continue;
+                    }
+                    _ => {
+                        by_buyer
+                            .entry(campaign.buyer_id.clone())
+                            .or_default()
+                            .push(Arc::clone(&campaign));
+                        by_id.insert(campaign.id.clone(), Arc::clone(&campaign));
+                        all.push(campaign);
+                    }
+                }
                 continue;
             }
 
@@ -50,14 +93,18 @@ impl CampaignCache {
                 .entry(campaign.buyer_id.clone())
                 .or_default()
                 .push(Arc::clone(&campaign));
+            by_id.insert(campaign.id.clone(), Arc::clone(&campaign));
             all.push(campaign);
         }
 
-        CampaignCache {
-            by_id,
-            by_buyer,
-            all: Arc::new(all),
-        }
+        (
+            CampaignCache {
+                by_id,
+                by_buyer,
+                all: Arc::new(all),
+            },
+            state_changes,
+        )
     }
 }
 
@@ -66,10 +113,14 @@ pub struct CampaignManager {
     /// Callbacks fired with IDs that were dropped from active indexes
     /// after a rebuild (expired, deactivated, or removed).
     on_expired_cbs: RwLock<Vec<Box<dyn Fn(&str) + Send + Sync>>>,
+    firestore_db: Option<Arc<FirestoreDb>>,
 }
 
 impl CampaignManager {
-    pub async fn start(provider: Arc<dyn Provider<Campaign>>) -> Result<Arc<Self>, Error> {
+    pub async fn start(
+        provider: Arc<dyn Provider<Campaign>>,
+        db: Option<Arc<FirestoreDb>>,
+    ) -> Result<Arc<Self>, Error> {
         let manager = Arc::new(Self {
             cache: ArcSwap::from_pointee(CampaignCache {
                 by_id: HashMap::new(),
@@ -77,6 +128,7 @@ impl CampaignManager {
                 all: Arc::new(Vec::new()),
             }),
             on_expired_cbs: RwLock::new(Vec::new()),
+            firestore_db: db,
         });
 
         let mgr = manager.clone();
@@ -85,16 +137,6 @@ impl CampaignManager {
             .await?;
 
         manager.load(initial);
-
-        // Periodic sweep to expunge expired campaigns and activate future ones
-        let mgr = manager.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-            loop {
-                interval.tick().await;
-                mgr.refresh_indexes();
-            }
-        });
 
         Ok(manager)
     }
@@ -107,7 +149,7 @@ impl CampaignManager {
 
     fn load(&self, campaigns: Vec<Campaign>) {
         let total = campaigns.len();
-        let cache = CampaignCache::build(campaigns.into_iter().map(Arc::new));
+        let (cache, _) = CampaignCache::build(campaigns.into_iter().map(Arc::new), None);
         info!(
             "Loaded {} active campaigns across {} buyers (total: {})",
             cache.all.len(),
@@ -117,13 +159,17 @@ impl CampaignManager {
         self.cache.store(Arc::new(cache));
     }
 
-    fn rebuild(&self, f: impl FnOnce(&mut HashMap<String, Arc<Campaign>>)) {
+    fn rebuild(
+        &self,
+        f: impl FnOnce(&mut HashMap<String, Arc<Campaign>>),
+        budget_check: Option<&dyn Fn(&Campaign) -> DeliveryState>,
+    ) {
         let prev = self.cache.load_full();
         let prev_active: HashSet<String> = prev.all.iter().map(|c| c.id.clone()).collect();
 
         let mut by_id = prev.by_id.clone();
         f(&mut by_id);
-        let cache = CampaignCache::build(by_id.into_values());
+        let (cache, state_changes) = CampaignCache::build(by_id.into_values(), budget_check);
         let new_active: HashSet<String> = cache.all.iter().map(|c| c.id.clone()).collect();
 
         self.cache.store(Arc::new(cache));
@@ -137,6 +183,13 @@ impl CampaignManager {
                 }
             }
         }
+
+        if !state_changes.is_empty() {
+            if let Some(db) = &self.firestore_db {
+                let db = db.clone();
+                tokio::spawn(write_delivery_states(db, state_changes));
+            }
+        }
     }
 
     fn handle_event(&self, event: ProviderEvent<Campaign>) {
@@ -146,33 +199,42 @@ impl CampaignManager {
                     "Campaign added: {} ({}) buyer={} budget={:.2}",
                     c.name, c.id, c.buyer_id, c.budget
                 );
-                self.rebuild(|m| {
-                    m.insert(c.id.clone(), Arc::new(c));
-                });
+                self.rebuild(
+                    |m| {
+                        m.insert(c.id.clone(), Arc::new(c));
+                    },
+                    None,
+                );
             }
             ProviderEvent::Modified(c) => {
                 debug!(
                     "Campaign modified: {} ({}) status={:?}",
                     c.name, c.id, c.status
                 );
-                self.rebuild(|m| {
-                    m.insert(c.id.clone(), Arc::new(c));
-                });
+                self.rebuild(
+                    |m| {
+                        m.insert(c.id.clone(), Arc::new(c));
+                    },
+                    None,
+                );
             }
             ProviderEvent::Removed(id) => {
                 debug!("Campaign removed: {}", id);
-                self.rebuild(|m| {
-                    m.remove(&id);
-                });
+                self.rebuild(
+                    |m| {
+                        m.remove(&id);
+                    },
+                    None,
+                );
             }
         }
     }
 
-    /// Re-derives indexes from the existing campaign set, dropping
-    /// campaigns that have expired or aren't yet active based on
-    /// current time. Called periodically by a background sweep.
-    pub fn refresh_indexes(&self) {
-        self.rebuild(|_| {});
+    /// Periodic refresh with budget checking. Drops expired/future
+    /// campaigns and filters budget-exhausted ones from the hot set.
+    /// Writes delivery state changes to Firestore.
+    pub fn refresh_with_budget(&self, budget_check: &dyn Fn(&Campaign) -> DeliveryState) {
+        self.rebuild(|_| {}, Some(budget_check));
     }
 
     /// Deal-mediated lookup: campaigns belonging to a specific buyer.
@@ -190,5 +252,45 @@ impl CampaignManager {
     /// for all fill policies except DealsOnly. Arc clone is O(1).
     pub fn all(&self) -> Arc<Vec<Arc<Campaign>>> {
         Arc::clone(&self.cache.load().all)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct DeliveryStateUpdate {
+    delivery_state: DeliveryState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<Status>,
+}
+
+async fn write_delivery_states(db: Arc<FirestoreDb>, changes: Vec<(String, DeliveryState)>) {
+    for (id, state) in changes {
+        let update = DeliveryStateUpdate {
+            status: if state == DeliveryState::TotalBudgetExhausted {
+                Some(Status::Paused)
+            } else {
+                None
+            },
+            delivery_state: state,
+        };
+
+        let fields: Vec<String> = if update.status.is_some() {
+            vec!["delivery_state".into(), "status".into()]
+        } else {
+            vec!["delivery_state".into()]
+        };
+
+        let result = db
+            .fluent()
+            .update()
+            .fields(fields)
+            .in_col("campaigns")
+            .document_id(&id)
+            .object(&update)
+            .execute::<()>()
+            .await;
+
+        if let Err(e) = result {
+            warn!(campaign = %id, error = %e, "Failed to write delivery state to Firestore");
+        }
     }
 }

@@ -345,6 +345,9 @@ mod tests {
             strategy: PricingStrategy::FixedPrice(price),
             advertiser_id: format!("adv_{id}"),
             targeting: CampaignTargeting::default(),
+            click_url: None,
+            creatives: vec![],
+            delivery_state: Default::default(),
         }
     }
 

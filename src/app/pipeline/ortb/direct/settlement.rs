@@ -62,6 +62,9 @@ mod tests {
             strategy: PricingStrategy::FixedPrice(price),
             advertiser_id: "adv1".into(),
             targeting: CampaignTargeting::default(),
+            click_url: None,
+            creatives: vec![],
+            delivery_state: Default::default(),
         }
     }
 

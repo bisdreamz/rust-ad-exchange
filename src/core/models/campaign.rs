@@ -11,6 +11,7 @@ pub struct CampaignCreative {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum CampaignPacing {
     /// Flat even pacing — equal spend rate every hour
     Even,
@@ -29,7 +30,18 @@ pub enum BudgetType {
     Daily,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub enum DeliveryState {
+    #[default]
+    Pending,
+    Delivering,
+    DailyBudgetExhausted,
+    TotalBudgetExhausted,
+    FlightEnded,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum PricingStrategy {
     FixedPrice(f64),
     // Dynamic (max_price: f64) etc
@@ -70,6 +82,8 @@ pub struct Campaign {
     /// Replaces the old campaign_id-based creative lookup.
     #[serde(default)]
     pub creatives: Vec<CampaignCreative>,
+    #[serde(default)]
+    pub delivery_state: DeliveryState,
 }
 
 fn default_budget_type() -> BudgetType {

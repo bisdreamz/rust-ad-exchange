@@ -1,4 +1,3 @@
-use crate::core::models::common::Status;
 use serde::{Deserialize, Serialize};
 
 /// A buyer profile — the company profile for running direct campaigns.
@@ -8,5 +7,5 @@ use serde::{Deserialize, Serialize};
 pub struct Buyer {
     pub id: String,
     pub buyer_name: String,
-    pub status: Status,
+    pub enabled: bool,
 }

@@ -6,22 +6,46 @@ use std::time::Duration;
 
 #[derive(Default, Debug, Clone)]
 pub struct DealCounters {
+    /// Bid responses from DSPs (or direct bids staged) that claimed this deal
+    bids: u64,
+    /// Won impressions (recorded via billing event)
     impressions: u64,
+    /// Gross CPM sum charged to buyers (/ 1000 = dollars). Admin-visible only.
+    revenue_cpm_sum: f64,
+    /// Net CPM sum paid to publishers (/ 1000 = dollars). Publisher + admin visible.
+    cost_cpm_sum: f64,
 }
 
 impl DealCounters {
+    pub fn bid(&mut self) {
+        self.bids += 1;
+    }
+
     pub fn impression(&mut self) {
         self.impressions += 1;
+    }
+
+    pub fn record_spend(&mut self, cpm_gross: f64, cpm_cost: f64) {
+        self.revenue_cpm_sum += cpm_gross;
+        self.cost_cpm_sum += cpm_cost;
     }
 }
 
 impl CounterBuffer for DealCounters {
     fn merge(&mut self, other: &Self) {
+        self.bids += other.bids;
         self.impressions += other.impressions;
+        self.revenue_cpm_sum += other.revenue_cpm_sum;
+        self.cost_cpm_sum += other.cost_cpm_sum;
     }
 
     fn counter_pairs(&self) -> Vec<(&'static str, CounterValue)> {
-        vec![("impressions", CounterValue::Int(self.impressions))]
+        vec![
+            ("bids", CounterValue::Int(self.bids)),
+            ("impressions", CounterValue::Int(self.impressions)),
+            ("revenue_cpm_sum", CounterValue::Float(self.revenue_cpm_sum)),
+            ("cost_cpm_sum", CounterValue::Float(self.cost_cpm_sum)),
+        ]
     }
 }
 

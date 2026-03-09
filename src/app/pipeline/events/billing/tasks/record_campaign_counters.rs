@@ -1,7 +1,7 @@
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::core::firestore::counters::campaign::{CampaignCounterStore, CampaignCounters};
 use crate::core::firestore::counters::publisher::PublisherCounterStore;
-use crate::core::managers::AdvertiserManager;
+use crate::core::managers::{AdvertiserManager, PublisherManager};
 use anyhow::{Error, anyhow};
 use pipeline::BlockingTask;
 use rtb::child_span_info;
@@ -14,6 +14,7 @@ pub struct RecordCampaignBillingCountersTask {
     campaign_store: Arc<CampaignCounterStore>,
     pub_store: Arc<PublisherCounterStore>,
     advertiser_manager: Arc<AdvertiserManager>,
+    publisher_manager: Arc<PublisherManager>,
 }
 
 impl RecordCampaignBillingCountersTask {
@@ -21,11 +22,13 @@ impl RecordCampaignBillingCountersTask {
         campaign_store: Arc<CampaignCounterStore>,
         pub_store: Arc<PublisherCounterStore>,
         advertiser_manager: Arc<AdvertiserManager>,
+        publisher_manager: Arc<PublisherManager>,
     ) -> Self {
         Self {
             campaign_store,
             pub_store,
             advertiser_manager,
+            publisher_manager,
         }
     }
 }
@@ -51,7 +54,21 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
         let dev_type = details.device_type.to_string();
         let dev_os = details.device_os.to_string();
         let country = &details.country;
-        let deal_id = notice.deal.as_ref().map(|d| d.id.as_str()).unwrap_or("");
+        let deal_id = notice
+            .deal
+            .as_ref()
+            .map(|d| d.id.as_str())
+            .unwrap_or("None");
+        let deal_name = notice
+            .deal
+            .as_ref()
+            .map(|d| d.name.as_str())
+            .unwrap_or("None");
+        let pub_name = self
+            .publisher_manager
+            .get(&details.pub_id)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
 
         if let Some(direct) = &notice.direct {
             let campaign = &direct.campaign;
@@ -70,9 +87,12 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
                 &campaign.id,
                 &campaign.name,
                 &details.pub_id,
+                &pub_name,
                 &creative.id,
+                &creative.name,
                 creative.format.as_str(),
                 deal_id,
+                deal_name,
                 &dev_type,
                 &dev_os,
                 country,
@@ -87,6 +107,8 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
                 &campaign.buyer_id,
                 buyer_name,
                 deal_id,
+                deal_name,
+                &pub_name,
                 &dev_type,
                 &dev_os,
                 country,
@@ -102,6 +124,8 @@ impl BlockingTask<BillingEventContext, Error> for RecordCampaignBillingCountersT
                 &details.bidder_id,
                 "",
                 deal_id,
+                deal_name,
+                &pub_name,
                 &dev_type,
                 &dev_os,
                 country,

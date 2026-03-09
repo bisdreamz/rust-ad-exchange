@@ -1,4 +1,6 @@
 pub mod constants;
+/// Pipeline for serving creative content (HTML, VAST XML)
+pub mod creatives;
 /// Module containing pipelines for processing all event types (burl, lurl, etc)
 pub mod events;
 /// Pipeline for processing bidrequests in and auction process. Could be prefixed with

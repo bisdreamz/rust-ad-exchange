@@ -74,7 +74,12 @@ impl CampaignCountersTask {
                         let campaign = &direct.campaign;
                         let creative = &direct.creative;
                         let buyer_name = &direct.buyer.buyer_name;
-                        let deal_id = bid_ctx.deal.get().map(|d| d.id.as_str()).unwrap_or("");
+                        let deal_id = bid_ctx.deal.get().map(|d| d.id.as_str()).unwrap_or("None");
+                        let deal_name = bid_ctx
+                            .deal
+                            .get()
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("None");
 
                         let mut counters = CampaignCounters::default();
                         counters.auction();
@@ -96,9 +101,12 @@ impl CampaignCountersTask {
                             &campaign.id,
                             &campaign.name,
                             &publisher.id,
+                            &publisher.name,
                             &creative.id,
+                            &creative.name,
                             creative.format.as_str(),
                             deal_id,
+                            deal_name,
                             &dev_type,
                             &dev_os,
                             &country,

@@ -2,7 +2,7 @@ use super::bucket::{AdaptiveBucket, TrackerStaleness};
 use super::reservation::{DEFAULT_BUCKET_SECS, EpochClock, FineClock, ReservationRing};
 use super::{SpendPacer, SpendTracker};
 use crate::core::cluster::ClusterDiscovery;
-use crate::core::models::campaign::{BudgetType, Campaign, CampaignPacing};
+use crate::core::models::campaign::{BudgetType, Campaign, CampaignPacing, DeliveryState};
 use dashmap::DashMap;
 use std::sync::Arc;
 use tracing::{trace, warn};
@@ -55,6 +55,32 @@ impl CampaignSpendPacer {
             cluster,
             clock,
             fine_clock,
+        }
+    }
+
+    /// Read-only budget check for the 60s rebuild loop.
+    /// Returns a DeliveryState based on current spend vs budget.
+    pub fn budget_state(&self, campaign: &Campaign) -> DeliveryState {
+        let tracker_cpm = match campaign.budget_type {
+            BudgetType::Total => self.tracker.total_spend(&campaign.id),
+            BudgetType::Daily => self.tracker.daily_spend(&campaign.id),
+        };
+        let buffered_cpm = self
+            .rings
+            .get(&campaign.id)
+            .map(|r| r.total())
+            .unwrap_or(0.0);
+        let spent_dollars = (tracker_cpm + buffered_cpm) / 1000.0;
+        let remaining = campaign.budget - spent_dollars;
+        let threshold = (campaign.budget * 0.02).min(5.0);
+
+        if remaining < threshold {
+            match campaign.budget_type {
+                BudgetType::Total => DeliveryState::TotalBudgetExhausted,
+                BudgetType::Daily => DeliveryState::DailyBudgetExhausted,
+            }
+        } else {
+            DeliveryState::Delivering
         }
     }
 
@@ -229,7 +255,7 @@ mod tests {
     use crate::app::pipeline::ortb::direct::pacing::reservation::{
         system_epoch_clock, system_fine_clock,
     };
-    use crate::core::models::campaign::{CampaignTargeting, PricingStrategy};
+    use crate::core::models::campaign::{CampaignTargeting, DeliveryState, PricingStrategy};
     use crate::core::models::common::Status;
     use async_trait::async_trait;
     use chrono::{DateTime, TimeZone, Utc};
@@ -328,6 +354,9 @@ mod tests {
             strategy: PricingStrategy::FixedPrice(5.0),
             advertiser_id: "adv1".into(),
             targeting: CampaignTargeting::default(),
+            click_url: None,
+            creatives: vec![],
+            delivery_state: DeliveryState::default(),
         }
     }
 
@@ -345,6 +374,9 @@ mod tests {
             strategy: PricingStrategy::FixedPrice(5.0),
             advertiser_id: "adv1".into(),
             targeting: CampaignTargeting::default(),
+            click_url: None,
+            creatives: vec![],
+            delivery_state: DeliveryState::default(),
         }
     }
 

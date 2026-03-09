@@ -61,6 +61,9 @@ mod tests {
                 common: CommonTargeting::default(),
                 deal_ids,
             },
+            click_url: None,
+            creatives: vec![],
+            delivery_state: Default::default(),
         }
     }
 

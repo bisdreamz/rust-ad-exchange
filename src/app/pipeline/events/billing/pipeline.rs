@@ -111,10 +111,16 @@ pub fn build_event_pipeline(
             .get()
             .ok_or_else(|| anyhow!("Campaign store set but no advertiser manager!"))?;
 
+        let pub_manager = context
+            .pub_manager
+            .get()
+            .ok_or_else(|| anyhow!("Campaign store set but no pub manager!"))?;
+
         builder.add_blocking(Box::new(RecordCampaignBillingCountersTask::new(
             campaign_store.clone(),
             pub_store,
             advertiser_manager.clone(),
+            pub_manager.clone(),
         )));
     }
 

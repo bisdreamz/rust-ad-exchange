@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// OR specific bidder(s) and optional wseats
 /// on remote RTB partners
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum DemandPolicy {
     /// Direct advertisers by seat id (internal buyer id)
     /// Only allows bidding by the selected on-platform
@@ -40,6 +41,7 @@ pub enum DealOwner {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum DealPricing {
     Inherit,
     Floor(f64),
@@ -57,6 +59,7 @@ pub struct DealTargeting {
 
 /// Pacing strategy for deal delivery
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum DealPacing {
     /// Spread delivery evenly across the flight or day
     Even,
@@ -66,6 +69,7 @@ pub enum DealPacing {
 
 /// Impression delivery goal for a deal
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
 pub enum DeliveryGoal {
     /// Total impressions across the entire flight.
     /// With Even pacing + end_date: spread across remaining time.

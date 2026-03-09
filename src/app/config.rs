@@ -112,6 +112,10 @@ pub struct RexConfig {
     /// Useful for local development or when traffic is pre-filtered.
     #[serde(default)]
     pub skip_ip_block: bool,
+    /// Creative asset CDN domain. Bare domain only, no protocol or path.
+    /// e.g. "ads.example.com". Resolves ${CDN_DOMAIN} macros at serve/bid time.
+    #[serde(default)]
+    pub asset_cdn_domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
