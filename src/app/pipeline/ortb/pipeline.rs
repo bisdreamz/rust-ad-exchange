@@ -1,8 +1,10 @@
 use crate::app::context::StartupContext;
 use crate::app::pipeline::ortb::tasks::finalizers::{
-    CampaignCountersTask, DealBidCountersTask, DemandCountersTask, PubCountersTask,
+    AuctionBidCountersTask, CampaignCountersTask, DealBidCountersTask, DemandCountersTask,
+    PubCountersTask,
 };
 use crate::app::pipeline::ortb::{AuctionContext, tasks};
+use crate::app::span::WrappedPipelineTask;
 use crate::core::demand::client::DemandClient;
 use crate::core::models::placement::FillPolicy;
 use anyhow::{Error, anyhow, bail};
@@ -17,7 +19,7 @@ use tracing::{Instrument, debug};
 
 fn build_enrichment_pipeline(
     context: &StartupContext,
-) -> Result<Pipeline<AuctionContext, Error>, Error> {
+) -> Result<Box<dyn AsyncTask<AuctionContext, Error>>, Error> {
     let ip_risk_filter = context
         .ip_risk_filter
         .lock()
@@ -64,7 +66,9 @@ fn build_enrichment_pipeline(
         .build()
         .expect("Enrichment pipeline should have tasks");
 
-    Ok(pipeline)
+    Ok(Box::new(WrappedPipelineTask::new(pipeline, || {
+        child_span_info!("enrichment_pipeline")
+    })))
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +77,7 @@ fn build_enrichment_pipeline(
 
 fn build_rtb_sub_pipeline(
     context: &StartupContext,
-) -> Result<Pipeline<AuctionContext, Error>, Error> {
+) -> Result<Box<dyn AsyncTask<AuctionContext, Error>>, Error> {
     let cluster_manager = context
         .cluster_manager
         .get()
@@ -129,7 +133,9 @@ fn build_rtb_sub_pipeline(
         .build()
         .expect("RTB sub-pipeline should have tasks");
 
-    Ok(pipeline)
+    Ok(Box::new(WrappedPipelineTask::new(pipeline, || {
+        child_span_info!("rtb_pipeline")
+    })))
 }
 
 // ---------------------------------------------------------------------------
@@ -174,11 +180,11 @@ fn build_shared_bid_pipeline(
 // ---------------------------------------------------------------------------
 
 struct ConditionalRtbTask {
-    rtb_pipeline: Pipeline<AuctionContext, Error>,
+    rtb_pipeline: Box<dyn AsyncTask<AuctionContext, Error>>,
 }
 
 impl ConditionalRtbTask {
-    fn new(rtb_pipeline: Pipeline<AuctionContext, Error>) -> Self {
+    fn new(rtb_pipeline: Box<dyn AsyncTask<AuctionContext, Error>>) -> Self {
         Self { rtb_pipeline }
     }
 }
@@ -241,6 +247,8 @@ fn build_finalizers_pipeline(
         pipeline_builder.add_async(Box::new(DemandCountersTask::new(demand_store.clone())));
     }
 
+    pipeline_builder.add_async(Box::new(AuctionBidCountersTask));
+
     // Campaign counters — only if campaign store + advertiser manager loaded
     let campaign_store_opt = context
         .counters_campaign_store
@@ -274,7 +282,7 @@ fn build_finalizers_pipeline(
 // ---------------------------------------------------------------------------
 
 struct AuctionOrchestratorTask {
-    enrichment_pipeline: Pipeline<AuctionContext, Error>,
+    enrichment_pipeline: Box<dyn AsyncTask<AuctionContext, Error>>,
     direct_task: Option<Box<dyn AsyncTask<AuctionContext, Error>>>,
     resolve_macros_task: Option<tasks::direct::ResolveDirectCreativeMacrosTask>,
     conditional_rtb: ConditionalRtbTask,
@@ -347,7 +355,7 @@ impl AuctionOrchestratorTask {
 #[async_trait]
 impl AsyncTask<AuctionContext, Error> for AuctionOrchestratorTask {
     async fn run(&self, ctx: &AuctionContext) -> Result<(), Error> {
-        let span = child_span_info!("auction_pipeline");
+        let span = child_span_info!("auction_orchestrator");
         self.run0(ctx).instrument(span).await
     }
 }

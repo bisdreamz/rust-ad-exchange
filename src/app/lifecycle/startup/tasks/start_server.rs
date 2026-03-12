@@ -1,3 +1,4 @@
+use crate::app::handlers::adtag::{adtag_handler, adtag_preflight};
 use crate::app::handlers::billing::billing_event_handler;
 use crate::app::handlers::creative_serving::raw_creative_handler;
 use crate::app::handlers::profile::profile_handler;
@@ -7,6 +8,7 @@ use crate::app::handlers::sync::{
 };
 use crate::app::http::COOKIE_DOMAIN;
 use crate::app::lifecycle::context::StartupContext;
+use crate::app::pipeline::adtag::request::AdTagRequest;
 use actix_web::HttpRequest;
 use actix_web::web;
 use anyhow::{Error, anyhow, bail};
@@ -89,10 +91,30 @@ impl AsyncTask<StartupContext, anyhow::Error> for StartServerTask {
             .ok_or(anyhow!("Sync store not built"))?
             .clone();
 
+        let adtag_pipeline = ctx
+            .adtag_pipeline
+            .get()
+            .ok_or(anyhow!("Adtag pipeline not built"))?
+            .clone();
+
         let raw_creative_pipeline = ctx.raw_creative_pipeline.get().cloned();
 
         let server = Server::listen(server_cfg, move |app| {
             app.route("/hi", web::get().to(|| async { "hi!" }))
+                    .route(
+                        "/publisher/adtag",
+                        web::post().to({
+                            let pipeline = adtag_pipeline.clone();
+                            move |req: web::Json<AdTagRequest>, http_req: HttpRequest| {
+                                let p = pipeline.clone();
+                                async move { adtag_handler(req, http_req, p, span_sample_rate).await }
+                            }
+                        }),
+                    )
+                    .route(
+                        "/publisher/adtag",
+                        web::method(actix_web::http::Method::OPTIONS).to(adtag_preflight),
+                    )
                     .route("/profile", web::get().to(profile_handler))
                     .route(
                         billing_event_path.as_str(),

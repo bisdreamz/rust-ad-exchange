@@ -1,4 +1,5 @@
 use crate::app::config::RexConfig;
+use crate::app::pipeline::adtag::AdtagContext;
 use crate::app::pipeline::creatives::raw::RawCreativeContext;
 use crate::app::pipeline::events::billing::context::BillingEventContext;
 use crate::app::pipeline::ortb::AuctionContext;
@@ -17,7 +18,7 @@ use crate::core::firestore::counters::demand::DemandCounterStore;
 use crate::core::firestore::counters::publisher::PublisherCounterStore;
 use crate::core::managers::{
     AdvertiserManager, BuyerManager, CampaignManager, CreativeManager, DealManager, DemandManager,
-    PublisherManager, ShaperManager,
+    PlacementManager, PropertyManager, PublisherManager, ShaperManager,
 };
 use crate::core::observability::ObservabilityProviders;
 use crate::core::usersync::SyncStore;
@@ -84,10 +85,17 @@ pub struct StartupContext {
     /// Unified campaign spend pacer — reads campaign.pacing per call
     pub spend_pacer: OnceLock<Arc<dyn SpendPacer>>,
 
+    /// Maintains updated list of publisher ad placements
+    pub placement_manager: OnceLock<Arc<PlacementManager>>,
+    /// Maintains updated list of publisher properties (sites/apps)
+    pub property_manager: OnceLock<Arc<PropertyManager>>,
+
     // Pipelines
     // TODO prefixing pipelines such as prebid which may then pass through rtb_pipeline
     /// The pipeline which defines the core of tasks a bidrequest will flow through for handling
     pub auction_pipeline: OnceLock<Arc<Pipeline<AuctionContext, Error>>>,
+    /// The pipeline which handles inbound ad tag requests — placement resolution, auction, response
+    pub adtag_pipeline: OnceLock<Arc<Pipeline<AdtagContext, Error>>>,
     /// The pipeline which handles billing event events, regardless of source (adm, burl..)
     pub event_pipeline: OnceLock<Arc<Pipeline<BillingEventContext, Error>>>,
     /// The pipeline which handles firing of our user sync pixel, which starts outbound demand sync

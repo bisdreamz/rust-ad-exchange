@@ -1,4 +1,5 @@
 pub mod bidders_load;
+pub mod build_adtag_pipeline;
 pub mod cluster;
 pub mod config_load;
 pub mod counter_stores;
@@ -9,6 +10,7 @@ pub mod direct_managers_load;
 pub mod event_pipeline;
 pub mod firestore;
 pub mod ip_risk_load;
+pub mod load_adtag_managers;
 pub mod observability;
 pub mod pubs_load;
 pub mod rtb_pipeline;

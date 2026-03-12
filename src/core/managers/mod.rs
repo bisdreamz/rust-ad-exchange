@@ -4,6 +4,8 @@ mod campaigns;
 mod creatives;
 pub mod deals;
 mod demand;
+mod placements;
+mod properties;
 mod publishers;
 mod shapers;
 
@@ -13,5 +15,7 @@ pub use campaigns::*;
 pub use creatives::*;
 pub use deals::*;
 pub use demand::*;
+pub use placements::*;
+pub use properties::*;
 pub use publishers::*;
 pub use shapers::*;

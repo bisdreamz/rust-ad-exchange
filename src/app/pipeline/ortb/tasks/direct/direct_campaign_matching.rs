@@ -65,6 +65,7 @@ impl AsyncTask<AuctionContext, Error> for DirectCampaignMatchingTask {
             deals_available = tracing::field::Empty,
             direct_bids_staged = tracing::field::Empty,
         );
+
         self.run0(ctx).instrument(span).await
     }
 }

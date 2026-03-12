@@ -244,6 +244,8 @@ pub struct IdentityContext {
 pub enum PublisherBlockReason {
     UnknownSeller,
     DisabledSeller,
+    UnknownPlacement,
+    UnknownProperty,
     IpInvalid,
     IpDatacenter,
     DeviceUnknown,

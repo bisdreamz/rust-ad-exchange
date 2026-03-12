@@ -121,7 +121,6 @@ impl BidSettlementTask {
     async fn run0(&self, context: &AuctionContext) -> Result<(), Error> {
         let span = tracing::Span::current();
         let bidders = context.bidders.lock().await;
-        span.record("bidders", tracing::field::debug(&bidders));
 
         let fill_policy = context
             .placement
@@ -161,6 +160,7 @@ impl BidSettlementTask {
             }
 
             span.record("outcome", "nobid");
+            span.record("bidders", tracing::field::debug(&bidders));
 
             return Ok(());
         }
@@ -194,14 +194,13 @@ impl BidSettlementTask {
 
         let final_bid_response_state = BidResponseState::Bid(final_bid_response_result?);
 
-        span.record("outcome", "bid");
-        span.record("response", tracing::field::debug(&final_bid_response_state));
-
         if let Err(_) = context.res.set(final_bid_response_state) {
             bail!("Built final bid response but one already assigned?!");
         }
 
         debug!("Assigned valid bid response to context");
+        span.record("outcome", "bid");
+        span.record("bidders", tracing::field::debug(&bidders));
 
         Ok(())
     }
@@ -214,7 +213,6 @@ impl AsyncTask<AuctionContext, Error> for BidSettlementTask {
             "bid_settlement_task",
             outcome = tracing::field::Empty,
             bidders = tracing::field::Empty,
-            response = tracing::field::Empty,
         );
 
         self.run0(context).instrument(span).await

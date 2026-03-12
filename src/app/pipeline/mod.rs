@@ -1,3 +1,4 @@
+pub mod adtag;
 pub mod constants;
 /// Pipeline for serving creative content (HTML, VAST XML)
 pub mod creatives;

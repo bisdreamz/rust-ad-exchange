@@ -2,6 +2,7 @@ use crate::app::lifecycle::context::StartupContext;
 use crate::app::lifecycle::startup::tasks::config_load::ConfigLoadTask;
 use crate::app::span::WrappedPipelineTask;
 use crate::app::startup::tasks::bidders_load::BidderManagerLoadTask;
+use crate::app::startup::tasks::build_adtag_pipeline::BuildAdtagPipelineTask;
 use crate::app::startup::tasks::cluster::ClusterDiscoveryTask;
 use crate::app::startup::tasks::counter_stores::CounterStoresTask;
 use crate::app::startup::tasks::creative_pipeline::BuildCreativePipelineTask;
@@ -11,6 +12,7 @@ use crate::app::startup::tasks::direct_managers_load::DirectManagersLoadTask;
 use crate::app::startup::tasks::event_pipeline::BuildEventPipelineTask;
 use crate::app::startup::tasks::firestore::FirestoreTask;
 use crate::app::startup::tasks::ip_risk_load::IpRiskLoadTask;
+use crate::app::startup::tasks::load_adtag_managers::LoadAdtagManagersTask;
 use crate::app::startup::tasks::observability::ConfigureObservabilityTask;
 use crate::app::startup::tasks::pubs_load::PubsManagerLoadTask;
 use crate::app::startup::tasks::rtb_pipeline::BuildRtbPipelineTask;
@@ -52,6 +54,7 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
         .with_async(Box::new(BidderManagerLoadTask::new(cfg_manager.clone())))
         .with_blocking(Box::new(ShapersManagerLoadTask))
         .with_async(Box::new(PubsManagerLoadTask::new(cfg_manager.clone())))
+        .with_async(Box::new(LoadAdtagManagersTask::new(cfg_manager.clone())))
         .with_async(Box::new(IpRiskLoadTask))
         .with_async(Box::new(DeviceLookupLoadTask))
         .with_blocking(Box::new(DemandUrlCacheStartTask::new(cfg_manager.clone())))
@@ -59,6 +62,7 @@ pub fn build_start_pipeline(cfg_path: PathBuf) -> Pipeline<StartupContext, anyho
             24 * 7,
         ))))
         .with_blocking(Box::new(BuildRtbPipelineTask))
+        .with_blocking(Box::new(BuildAdtagPipelineTask))
         .with_blocking(Box::new(BuildEventPipelineTask))
         .with_blocking(Box::new(BuildSyncPipelinesTask))
         .with_blocking(Box::new(BuildCreativePipelineTask))

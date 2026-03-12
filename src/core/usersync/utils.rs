@@ -5,6 +5,12 @@ use std::sync::Arc;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+/// Builds the URL for our sync-out endpoint for a given publisher.
+/// The resulting URL is safe to return to the JS tag as a fire-and-forget iframe src.
+pub fn build_sync_out_url(domain: &str, pub_id: &str) -> String {
+    format!("https://{}/sync/out/{}", domain, pub_id)
+}
+
 /// Check if buyer id value contains our
 /// expected ['REX_USER_PREFIX'] prefixed value
 pub fn validate_local_id(local_id: &str) -> bool {

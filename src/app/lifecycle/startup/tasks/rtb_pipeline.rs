@@ -10,12 +10,13 @@ use tracing::instrument;
 pub struct BuildRtbPipelineTask;
 
 impl BlockingTask<StartupContext, Error> for BuildRtbPipelineTask {
-    #[instrument(skip_all, name = "build_rtb_pipeline_task")]
+    #[instrument(skip_all, name = "build_auction_pipeline_task")]
     fn run(&self, context: &StartupContext) -> Result<(), Error> {
         let auction_pipeline = build_auction_pipeline(context)?;
 
-        let observed_pipeline_task =
-            WrappedPipelineTask::new(auction_pipeline, move || child_span_info!("rtb_pipeline"));
+        let observed_pipeline_task = WrappedPipelineTask::new(auction_pipeline, move || {
+            child_span_info!("auction_pipeline")
+        });
 
         let observed_pipeline = PipelineBuilder::new()
             .with_async(Box::new(observed_pipeline_task))
@@ -25,6 +26,6 @@ impl BlockingTask<StartupContext, Error> for BuildRtbPipelineTask {
         context
             .auction_pipeline
             .set(Arc::new(observed_pipeline))
-            .map_err(|_| anyhow::anyhow!("rtb_pipeline already assigned!"))
+            .map_err(|_| anyhow::anyhow!("auction_pipeline already assigned!"))
     }
 }

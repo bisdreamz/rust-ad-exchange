@@ -4,6 +4,8 @@ use crate::core::models::buyer::Buyer;
 use crate::core::models::campaign::Campaign;
 use crate::core::models::creative::Creative;
 use crate::core::models::deal::Deal;
+use crate::core::models::placement::Placement;
+use crate::core::models::property::Property;
 use crate::core::models::publisher::Publisher;
 use config::Config;
 use derive_builder::Builder;
@@ -88,6 +90,8 @@ pub struct RexConfig {
     pub caches: CacheConfig,
     pub bidders: Option<Vec<BidderConfig>>,
     pub publishers: Option<Vec<Publisher>>,
+    pub placements: Option<Vec<Placement>>,
+    pub properties: Option<Vec<Property>>,
     pub campaigns: Option<Vec<Campaign>>,
     pub creatives: Option<Vec<Creative>>,
     pub deals: Option<Vec<Deal>>,

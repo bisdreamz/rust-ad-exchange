@@ -11,8 +11,9 @@ use pipeline::Pipeline;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::json::{FastJson, JsonBidResponseState};
 use rtb::{BidRequest, sample_or_attach_root_span};
+use serde_json::{self, json};
 use std::sync::{Arc, LazyLock};
-use tracing::{Instrument, debug};
+use tracing::{Instrument, Level, Span, debug, trace};
 
 static REQUESTS_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     global::meter("rex")
@@ -112,11 +113,20 @@ async fn handle_bid_request(
         "handle_bid_request",
         pub_id = pubid,
         source = source,
+        final_bid_response_state = tracing::field::Empty,
     );
 
-    handle_bid_request_instrumented(auction_id, source, publisher, req, http, pipeline)
-        .instrument(root_span)
-        .await
+    async move {
+        let (brs, pipeline_completed) =
+            handle_bid_request_instrumented(auction_id, source, publisher, req, http, pipeline)
+                .await;
+
+        attach_bid_response_state_to_parent_span(&brs);
+
+        (brs, pipeline_completed)
+    }
+    .instrument(root_span)
+    .await
 }
 
 pub async fn json_bid_handler(
@@ -163,4 +173,48 @@ pub async fn json_bid_handler(
     record_request_metric(path, &source, pubid, &brs, pipeline_completed, duration);
 
     JsonBidResponseState(brs)
+}
+
+fn attach_bid_response_state_to_parent_span(brs: &BidResponseState) {
+    let span = Span::current();
+    if span.is_disabled() {
+        return;
+    }
+
+    span.record("final_bid_response_state", tracing::field::debug(brs));
+
+    if tracing::enabled!(Level::TRACE) {
+        match format_bid_response_state_pretty(brs) {
+            Ok(pretty_json) => {
+                trace!(
+                    final_bid_response_state_pretty = %pretty_json,
+                    "Final RTB bid response state"
+                );
+            }
+            Err(err) => {
+                debug!(
+                    error = %err,
+                    "Failed to serialize final bid response state as pretty JSON"
+                );
+            }
+        }
+    }
+}
+
+fn format_bid_response_state_pretty(brs: &BidResponseState) -> Result<String, serde_json::Error> {
+    match brs {
+        BidResponseState::Bid(response) => serde_json::to_string_pretty(response),
+        BidResponseState::NoBidReason { reqid, nbr, desc } => {
+            serde_json::to_string_pretty(&json!({
+                "type": "no_bid_reason",
+                "reqid": reqid,
+                "nbr": nbr,
+                "desc": desc,
+            }))
+        }
+        BidResponseState::NoBid { desc } => serde_json::to_string_pretty(&json!({
+            "type": "no_bid",
+            "desc": desc,
+        })),
+    }
 }

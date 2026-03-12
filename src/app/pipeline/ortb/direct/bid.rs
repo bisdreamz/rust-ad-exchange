@@ -5,7 +5,7 @@ use crate::app::pipeline::ortb::context::{
 use crate::core::models::bidder::Bidder;
 use crate::core::models::buyer::Buyer;
 use crate::core::models::campaign::Campaign;
-use crate::core::models::creative::Creative;
+use crate::core::models::creative::{Creative, CreativeFormat};
 use crate::core::models::deal::Deal;
 use rtb::BidResponse;
 use rtb::bid_response::bid::AdmOneof;
@@ -25,12 +25,19 @@ pub fn synthesize_bid(
     price: f64,
     imp_id: &str,
 ) -> BidContext {
+    let (w, h) = match creative.format {
+        CreativeFormat::Banner { w, h } => (w as i32, h as i32),
+        _ => (0, 0),
+    };
+
     let bid = Bid {
         id: Uuid::new_v4().to_string(),
         impid: imp_id.to_string(),
         price,
         adm_oneof: Some(AdmOneof::Adm(creative.content.clone())),
         crid: creative.id.clone(),
+        w,
+        h,
         ..Default::default()
     };
 
