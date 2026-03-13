@@ -6,3 +6,13 @@ pub enum Status {
     Paused,
     Archived,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub enum DeliveryState {
+    #[default]
+    Pending,
+    Delivering,
+    DailyBudgetExhausted,
+    TotalBudgetExhausted,
+    FlightEnded,
+}

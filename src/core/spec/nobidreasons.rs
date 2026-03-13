@@ -11,5 +11,6 @@ spec_list! {
     SELLER_DISABLED = 503 => "Disabled Seller",
     THROTTLED_BUYER_QPS = 504 => "Throttled All Buyers For QPS",
     MISSING_DOMAIN_OR_BUNDLE = 505 => "Missing Domain or Bundle",
-    MISSING_DEVICE_DETAILS = 506 => "Missing Device Details (IP or UA)"
+    MISSING_DEVICE_DETAILS = 506 => "Missing Device Details (IP or UA)",
+    NO_IMPRESSIONS_MATCH_AVAILABLE_VIEWPORT = 507 => "No Impressions Match Available Viewport",
 }

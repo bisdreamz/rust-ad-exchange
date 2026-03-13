@@ -1,4 +1,4 @@
-use crate::core::models::common::Status;
+use crate::core::models::common::{DeliveryState, Status};
 use crate::core::models::targeting::CommonTargeting;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -128,4 +128,7 @@ pub struct Deal {
     /// bids self-compete on price.
     #[serde(default)]
     pub takes_priority: bool,
+    /// Delivery state tracked by the exchange, written to Firestore periodically.
+    #[serde(default)]
+    pub delivery_state: DeliveryState,
 }

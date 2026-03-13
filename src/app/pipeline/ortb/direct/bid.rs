@@ -5,7 +5,7 @@ use crate::app::pipeline::ortb::context::{
 use crate::core::models::bidder::Bidder;
 use crate::core::models::buyer::Buyer;
 use crate::core::models::campaign::Campaign;
-use crate::core::models::creative::{Creative, CreativeFormat};
+use crate::core::models::creative::{BannerSize, Creative, CreativeFormat};
 use crate::core::models::deal::Deal;
 use rtb::BidResponse;
 use rtb::bid_response::bid::AdmOneof;
@@ -21,12 +21,16 @@ pub fn synthesize_bid(
     buyer: &Arc<Buyer>,
     campaign: &Arc<Campaign>,
     creative: &Arc<Creative>,
+    banner_size: Option<BannerSize>,
     deal: Option<Arc<Deal>>,
     price: f64,
     imp_id: &str,
 ) -> BidContext {
-    let (w, h) = match creative.format {
-        CreativeFormat::Banner { w, h } => (w as i32, h as i32),
+    let (w, h) = match &creative.format {
+        CreativeFormat::Banner { preferred_size, .. } => {
+            let size = banner_size.unwrap_or(*preferred_size);
+            (size.w as i32, size.h as i32)
+        }
         _ => (0, 0),
     };
 

@@ -4,6 +4,7 @@ use anyhow::{Error, anyhow};
 use async_trait::async_trait;
 use pipeline::{AsyncTask, Pipeline};
 use rtb::child_span_info;
+use rtb::common::bidresponsestate::BidResponseState;
 use std::sync::Arc;
 use tracing::{Instrument, debug};
 
@@ -25,17 +26,37 @@ impl AsyncTask<AdtagContext, Error> for RunAuctionTask {
             .get()
             .ok_or_else(|| anyhow!("auction_ctx not set"))?;
 
+        if auction_ctx.res.get().is_some() {
+            debug!("auction already finalized before RTB pipeline, skipping");
+            return Ok(());
+        }
+
         let span = child_span_info!("run_auction_task");
-        self.auction_pipeline
+        match self
+            .auction_pipeline
             .run(auction_ctx)
             .instrument(span)
             .await
-            .map_err(|e| {
+        {
+            Ok(()) => {
+                debug!("auction pipeline completed");
+                Ok(())
+            }
+            Err(e) if finalized_without_bid(auction_ctx) => {
+                debug!("auction pipeline produced terminal no-bid: {}", e);
+                Ok(())
+            }
+            Err(e) => Err(e).map_err(|e| {
                 debug!("auction pipeline aborted: {}", e);
                 e
-            })?;
-
-        debug!("auction pipeline completed");
-        Ok(())
+            }),
+        }
     }
+}
+
+fn finalized_without_bid(auction_ctx: &AuctionContext) -> bool {
+    matches!(
+        auction_ctx.res.get(),
+        Some(BidResponseState::NoBid { .. } | BidResponseState::NoBidReason { .. })
+    )
 }

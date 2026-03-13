@@ -1,15 +1,15 @@
-use crate::core::models::campaign::{Campaign, DeliveryState};
-use crate::core::models::common::Status;
+use super::delivery::write_delivery_states;
+use crate::core::models::campaign::Campaign;
+use crate::core::models::common::{DeliveryState, Status};
 use crate::core::providers::{Provider, ProviderEvent};
 use anyhow::Error;
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use firestore::FirestoreDb;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 struct CampaignCache {
     by_id: HashMap<String, Arc<Campaign>>,
@@ -187,7 +187,7 @@ impl CampaignManager {
         if !state_changes.is_empty() {
             if let Some(db) = &self.firestore_db {
                 let db = db.clone();
-                tokio::spawn(write_delivery_states(db, state_changes));
+                tokio::spawn(write_delivery_states(db, "campaigns", state_changes, true));
             }
         }
     }
@@ -252,45 +252,5 @@ impl CampaignManager {
     /// for all fill policies except DealsOnly. Arc clone is O(1).
     pub fn all(&self) -> Arc<Vec<Arc<Campaign>>> {
         Arc::clone(&self.cache.load().all)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct DeliveryStateUpdate {
-    delivery_state: DeliveryState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    status: Option<Status>,
-}
-
-async fn write_delivery_states(db: Arc<FirestoreDb>, changes: Vec<(String, DeliveryState)>) {
-    for (id, state) in changes {
-        let update = DeliveryStateUpdate {
-            status: if state == DeliveryState::TotalBudgetExhausted {
-                Some(Status::Paused)
-            } else {
-                None
-            },
-            delivery_state: state,
-        };
-
-        let fields: Vec<String> = if update.status.is_some() {
-            vec!["delivery_state".into(), "status".into()]
-        } else {
-            vec!["delivery_state".into()]
-        };
-
-        let result = db
-            .fluent()
-            .update()
-            .fields(fields)
-            .in_col("campaigns")
-            .document_id(&id)
-            .object(&update)
-            .execute::<()>()
-            .await;
-
-        if let Err(e) = result {
-            warn!(campaign = %id, error = %e, "Failed to write delivery state to Firestore");
-        }
     }
 }

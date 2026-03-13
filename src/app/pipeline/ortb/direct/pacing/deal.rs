@@ -1,6 +1,7 @@
 use super::bucket::{AdaptiveBucket, TrackerStaleness};
 use super::reservation::{DEFAULT_BUCKET_SECS, EpochClock, FineClock, ReservationRing};
 use super::traits::{DealImpressionTracker, DealPacer};
+use crate::core::models::common::DeliveryState;
 use crate::core::models::deal::{Deal, DealPacing, DeliveryGoal};
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -225,6 +226,38 @@ impl DealPacer for EvenDealPacer {
 }
 
 impl EvenDealPacer {
+    /// Read-only impression check for the 60s rebuild loop.
+    /// Returns a DeliveryState based on current impressions vs delivery goal.
+    pub fn impression_state(&self, deal: &Deal) -> DeliveryState {
+        let goal = match &deal.delivery_goal {
+            Some(goal) => goal,
+            None => return DeliveryState::Delivering,
+        };
+
+        match goal {
+            DeliveryGoal::Total(limit) => {
+                if self.effective_imps(&deal.id) >= *limit {
+                    DeliveryState::TotalBudgetExhausted
+                } else {
+                    DeliveryState::Delivering
+                }
+            }
+            DeliveryGoal::Daily(daily_limit) => {
+                let daily_delivered = self.tracker.daily_impressions(&deal.id)
+                    + self
+                        .rings
+                        .get(&deal.id)
+                        .map(|r| r.total() as u64)
+                        .unwrap_or(0);
+                if daily_delivered >= *daily_limit {
+                    DeliveryState::DailyBudgetExhausted
+                } else {
+                    DeliveryState::Delivering
+                }
+            }
+        }
+    }
+
     /// Evict pacing state for a deal that is no longer active.
     pub fn evict(&self, id: &str) {
         self.rings.remove(id);

@@ -3,6 +3,7 @@ mod buyers;
 mod campaigns;
 mod creatives;
 pub mod deals;
+mod delivery;
 mod demand;
 mod placements;
 mod properties;

@@ -103,6 +103,7 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
             }));
         }
 
+        let deal_pacer_for_sweep = deal_pacer.clone();
         context
             .deal_pacer
             .set(deal_pacer)
@@ -139,19 +140,25 @@ impl AsyncTask<StartupContext, Error> for TrackerInitTask {
 
         info!("Campaign spend pacer initialized");
 
-        // Periodic sweep: time-based transitions + budget filtering.
-        // Lives here because it needs the spend_pacer (created above).
-        if let Some(campaign_mgr) = context.campaign_manager.get() {
-            let mgr = campaign_mgr.clone();
-            let sp = spend_pacer;
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-                loop {
-                    interval.tick().await;
+        // Periodic sweep: time-based transitions + budget/impression filtering.
+        // Lives here because it needs the spend_pacer and deal_pacer (created above).
+        let campaign_mgr_opt = context.campaign_manager.get().cloned();
+        let deal_mgr_opt = context.deal_manager.get().cloned();
+        let sp = spend_pacer;
+        let dp = deal_pacer_for_sweep;
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                if let Some(ref mgr) = campaign_mgr_opt {
                     mgr.refresh_with_budget(&|c| sp.budget_state(c));
                 }
-            });
-        }
+                if let Some(ref mgr) = deal_mgr_opt {
+                    mgr.refresh_with_impressions(&|d| dp.impression_state(d));
+                }
+            }
+        });
 
         Ok(())
     }

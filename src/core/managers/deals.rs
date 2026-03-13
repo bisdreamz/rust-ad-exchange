@@ -1,9 +1,11 @@
-use crate::core::models::common::Status;
+use super::delivery::write_delivery_states;
+use crate::core::models::common::{DeliveryState, Status};
 use crate::core::models::deal::{Deal, DemandPolicy};
 use crate::core::providers::{Provider, ProviderEvent};
 use anyhow::Error;
 use arc_swap::ArcSwap;
 use chrono::Utc;
+use firestore::FirestoreDb;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -39,13 +41,15 @@ impl DealCache {
         }
         ids
     }
-}
 
-impl DealCache {
-    fn build(deals: impl IntoIterator<Item = Arc<Deal>>) -> Self {
+    fn build(
+        deals: impl IntoIterator<Item = Arc<Deal>>,
+        impression_check: Option<&dyn Fn(&Deal) -> DeliveryState>,
+    ) -> (Self, Vec<(String, DeliveryState)>) {
         let mut by_id = HashMap::new();
         let mut direct = Vec::new();
         let mut rtb_by_bidder: HashMap<String, BidderDeals> = HashMap::new();
+        let mut state_changes = Vec::new();
         let now = Utc::now();
 
         for deal in deals {
@@ -62,29 +66,73 @@ impl DealCache {
             }
 
             if deal.end_date.is_some_and(|e| now > e) {
+                let new_state = DeliveryState::FlightEnded;
+                if deal.delivery_state != new_state {
+                    state_changes.push((deal.id.clone(), new_state.clone()));
+                    let mut updated = (*deal).clone();
+                    updated.delivery_state = new_state;
+                    let updated = Arc::new(updated);
+                    by_id.insert(updated.id.clone(), Arc::clone(&updated));
+                }
                 trace!(deal = %deal.id, end = %deal.end_date.unwrap(), "Deal skipped: expired");
                 continue;
             }
 
-            match &deal.policy {
-                DemandPolicy::Direct { .. } => direct.push(Arc::clone(&deal)),
-                DemandPolicy::Rtb { wdsps, private } => {
-                    for (dsp_id, _wseats) in wdsps {
-                        let entry = rtb_by_bidder.entry(dsp_id.clone()).or_default();
-                        if *private {
-                            entry.private.push(Arc::clone(&deal));
-                        } else {
-                            entry.open.push(Arc::clone(&deal));
-                        }
+            // Impression goal check — mirrors campaign budget check
+            if let Some(check) = &impression_check {
+                let new_state = check(&deal);
+                let deal = if deal.delivery_state != new_state {
+                    state_changes.push((deal.id.clone(), new_state.clone()));
+                    let mut updated = (*deal).clone();
+                    updated.delivery_state = new_state.clone();
+                    let updated = Arc::new(updated);
+                    by_id.insert(updated.id.clone(), Arc::clone(&updated));
+                    updated
+                } else {
+                    deal
+                };
+                match new_state {
+                    DeliveryState::DailyBudgetExhausted | DeliveryState::TotalBudgetExhausted => {
+                        // Goal reached — keep in by_id but skip active indexes
+                        continue;
+                    }
+                    _ => {
+                        Self::index_deal(&deal, &mut direct, &mut rtb_by_bidder);
+                    }
+                }
+                continue;
+            }
+
+            Self::index_deal(&deal, &mut direct, &mut rtb_by_bidder);
+        }
+
+        (
+            DealCache {
+                by_id,
+                direct: Arc::new(direct),
+                rtb_by_bidder: Arc::new(rtb_by_bidder),
+            },
+            state_changes,
+        )
+    }
+
+    fn index_deal(
+        deal: &Arc<Deal>,
+        direct: &mut Vec<Arc<Deal>>,
+        rtb_by_bidder: &mut HashMap<String, BidderDeals>,
+    ) {
+        match &deal.policy {
+            DemandPolicy::Direct { .. } => direct.push(Arc::clone(deal)),
+            DemandPolicy::Rtb { wdsps, private } => {
+                for (dsp_id, _wseats) in wdsps {
+                    let entry = rtb_by_bidder.entry(dsp_id.clone()).or_default();
+                    if *private {
+                        entry.private.push(Arc::clone(deal));
+                    } else {
+                        entry.open.push(Arc::clone(deal));
                     }
                 }
             }
-        }
-
-        DealCache {
-            by_id,
-            direct: Arc::new(direct),
-            rtb_by_bidder: Arc::new(rtb_by_bidder),
         }
     }
 }
@@ -92,10 +140,14 @@ impl DealCache {
 pub struct DealManager {
     cache: ArcSwap<DealCache>,
     on_expired_cbs: RwLock<Vec<Box<dyn Fn(&str) + Send + Sync>>>,
+    firestore_db: Option<Arc<FirestoreDb>>,
 }
 
 impl DealManager {
-    pub async fn start(provider: Arc<dyn Provider<Deal>>) -> Result<Arc<Self>, Error> {
+    pub async fn start(
+        provider: Arc<dyn Provider<Deal>>,
+        db: Option<Arc<FirestoreDb>>,
+    ) -> Result<Arc<Self>, Error> {
         let manager = Arc::new(Self {
             cache: ArcSwap::from_pointee(DealCache {
                 by_id: HashMap::new(),
@@ -103,6 +155,7 @@ impl DealManager {
                 rtb_by_bidder: Arc::new(HashMap::new()),
             }),
             on_expired_cbs: RwLock::new(Vec::new()),
+            firestore_db: db,
         });
 
         let mgr = manager.clone();
@@ -112,22 +165,12 @@ impl DealManager {
 
         manager.load(initial);
 
-        // Periodic sweep to expunge expired deals and activate future deals
-        let mgr = manager.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-            loop {
-                interval.tick().await;
-                mgr.refresh_indexes();
-            }
-        });
-
         Ok(manager)
     }
 
     fn load(&self, deals: Vec<Deal>) {
         let total = deals.len();
-        let cache = DealCache::build(deals.into_iter().map(Arc::new));
+        let (cache, _) = DealCache::build(deals.into_iter().map(Arc::new), None);
         let rtb_count: usize = cache
             .rtb_by_bidder
             .values()
@@ -151,13 +194,17 @@ impl DealManager {
 
     /// Clone-on-write rebuild: copies the id map, applies the mutation,
     /// then re-derives all index slices from scratch.
-    fn rebuild(&self, f: impl FnOnce(&mut HashMap<String, Arc<Deal>>)) {
+    fn rebuild(
+        &self,
+        f: impl FnOnce(&mut HashMap<String, Arc<Deal>>),
+        impression_check: Option<&dyn Fn(&Deal) -> DeliveryState>,
+    ) {
         let prev = self.cache.load_full();
         let prev_active = prev.active_ids();
 
         let mut by_id = prev.by_id.clone();
         f(&mut by_id);
-        let cache = DealCache::build(by_id.into_values());
+        let (cache, state_changes) = DealCache::build(by_id.into_values(), impression_check);
         let new_active = cache.active_ids();
 
         self.cache.store(Arc::new(cache));
@@ -171,36 +218,52 @@ impl DealManager {
                 }
             }
         }
+
+        if !state_changes.is_empty() {
+            if let Some(db) = &self.firestore_db {
+                let db = db.clone();
+                tokio::spawn(write_delivery_states(db, "deals", state_changes, false));
+            }
+        }
     }
 
     fn handle_event(&self, event: ProviderEvent<Deal>) {
         match event {
             ProviderEvent::Added(d) => {
                 debug!("Deal added: {} ({}) policy={:?}", d.name, d.id, d.policy);
-                self.rebuild(|m| {
-                    m.insert(d.id.clone(), Arc::new(d));
-                });
+                self.rebuild(
+                    |m| {
+                        m.insert(d.id.clone(), Arc::new(d));
+                    },
+                    None,
+                );
             }
             ProviderEvent::Modified(d) => {
                 debug!("Deal modified: {} ({}) status={:?}", d.name, d.id, d.status);
-                self.rebuild(|m| {
-                    m.insert(d.id.clone(), Arc::new(d));
-                });
+                self.rebuild(
+                    |m| {
+                        m.insert(d.id.clone(), Arc::new(d));
+                    },
+                    None,
+                );
             }
             ProviderEvent::Removed(id) => {
                 debug!("Deal removed: {}", id);
-                self.rebuild(|m| {
-                    m.remove(&id);
-                });
+                self.rebuild(
+                    |m| {
+                        m.remove(&id);
+                    },
+                    None,
+                );
             }
         }
     }
 
-    /// Re-derives indexes from the existing deal set, dropping deals
-    /// that have expired or aren't yet active based on current time.
-    /// Called periodically by a background sweep.
-    pub fn refresh_indexes(&self) {
-        self.rebuild(|_| {});
+    /// Periodic refresh with impression goal checking. Drops expired/future
+    /// deals and filters goal-reached ones from the hot set.
+    /// Writes delivery state changes to Firestore.
+    pub fn refresh_with_impressions(&self, check: &dyn Fn(&Deal) -> DeliveryState) {
+        self.rebuild(|_| {}, Some(check));
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Deal>> {

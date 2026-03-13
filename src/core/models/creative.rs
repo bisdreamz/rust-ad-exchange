@@ -5,6 +5,12 @@ use crate::core::models::common::Status;
 use rtb::utils::adm::AdFormat;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BannerSize {
+    pub w: u32,
+    pub h: u32,
+}
+
 /// The raw underlying creative data
 /// kind, separate from its conceptual
 /// creative format
@@ -26,7 +32,11 @@ pub enum CreativeKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum CreativeFormat {
-    Banner { w: u32, h: u32 },
+    Banner {
+        preferred_size: BannerSize,
+        #[serde(default)]
+        alternate_sizes: Vec<BannerSize>,
+    },
     Video,
     Native,
     Audio,
@@ -49,11 +59,32 @@ impl CreativeFormat {
         }
     }
 
+    pub fn banner_supported_sizes(&self) -> Vec<BannerSize> {
+        match self {
+            Self::Banner {
+                preferred_size,
+                alternate_sizes,
+            } => {
+                let mut sizes = Vec::with_capacity(alternate_sizes.len() + 1);
+                sizes.push(*preferred_size);
+                sizes.extend(alternate_sizes.iter().copied());
+                sizes
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Construct from an RTB [`AdFormat`] with the bid's
     /// reported dimensions (relevant for banner).
     pub fn from_rtb(af: AdFormat, w: u32, h: u32) -> Self {
         match af {
-            AdFormat::Banner => Self::Banner { w, h },
+            AdFormat::Banner => {
+                let size = BannerSize { w, h };
+                Self::Banner {
+                    preferred_size: size,
+                    alternate_sizes: vec![],
+                }
+            }
             AdFormat::Video => Self::Video,
             AdFormat::Native => Self::Native,
             AdFormat::Audio => Self::Audio,

@@ -75,7 +75,7 @@ impl AsyncTask<StartupContext, Error> for DirectManagersLoadTask {
             AdvertiserManager::start(adv_prov),
             CampaignManager::start(camp_prov, firestore_opt.clone()),
             CreativeManager::start(crea_prov),
-            DealManager::start(deal_prov),
+            DealManager::start(deal_prov, firestore_opt.clone()),
         )?;
 
         context

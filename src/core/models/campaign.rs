@@ -1,3 +1,4 @@
+pub use crate::core::models::common::DeliveryState;
 use crate::core::models::common::Status;
 use crate::core::models::targeting::CommonTargeting;
 use chrono::{DateTime, Utc};
@@ -28,16 +29,6 @@ pub enum BudgetType {
     Total,
     /// Per-day spending cap, resets at midnight UTC
     Daily,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub enum DeliveryState {
-    #[default]
-    Pending,
-    Delivering,
-    DailyBudgetExhausted,
-    TotalBudgetExhausted,
-    FlightEnded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

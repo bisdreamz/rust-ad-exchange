@@ -39,6 +39,14 @@ pub struct RenderCaps {
     /// Maps to OpenRTB banner.topframe.
     #[serde(default)]
     pub top_frame: bool,
+    /// Maximum render width currently available to the tag surface, in CSS px.
+    /// Omitted when the browser could not determine a positive viewport width.
+    #[serde(default)]
+    pub max_w: Option<u32>,
+    /// Maximum render height currently available to the tag surface, in CSS px.
+    /// Omitted when the browser could not determine a positive viewport height.
+    #[serde(default)]
+    pub max_h: Option<u32>,
 }
 
 /// Top-level consent envelope. Absent field = signal unavailable or timed out on the client.

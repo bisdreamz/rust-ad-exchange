@@ -147,7 +147,7 @@ impl DirectCampaignMatchingTask {
                         continue;
                     }
 
-                    let creative = match creative::select_creative(
+                    let selected_creative = match creative::select_creative(
                         &candidate.campaign.creatives,
                         &self.creative_manager,
                         imp,
@@ -206,7 +206,7 @@ impl DirectCampaignMatchingTask {
                     debug!(
                         campaign = %candidate.campaign.id,
                         campaign_name = %candidate.campaign.name,
-                        creative = %creative.id,
+                        creative = %selected_creative.creative.id,
                         price = candidate.price,
                         deal = deal_id.unwrap_or("none"),
                         imp_id = %imp.id,
@@ -216,7 +216,8 @@ impl DirectCampaignMatchingTask {
                     let bid_ctx = bid::synthesize_bid(
                         &buyer,
                         &candidate.campaign,
-                        &creative,
+                        &selected_creative.creative,
+                        selected_creative.banner_size,
                         candidate.deal,
                         candidate.price,
                         &imp.id,
