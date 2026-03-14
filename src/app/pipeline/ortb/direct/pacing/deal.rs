@@ -357,6 +357,7 @@ mod tests {
             delivery_goal: goal,
             pacing,
             takes_priority: false,
+            delivery_state: Default::default(),
         }
     }
 
@@ -383,6 +384,7 @@ mod tests {
             delivery_goal: goal,
             pacing,
             takes_priority: false,
+            delivery_state: Default::default(),
         }
     }
 

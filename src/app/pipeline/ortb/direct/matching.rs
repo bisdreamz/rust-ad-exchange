@@ -379,6 +379,7 @@ mod tests {
             delivery_goal: None,
             pacing: None,
             takes_priority: false,
+            delivery_state: Default::default(),
         }
     }
 
